@@ -144,7 +144,9 @@ export function insertClip(p: Project, media: MediaItem, index = p.clips.length)
   };
   const clips = [...p.clips];
   clips.splice(index, 0, clip);
-  return { ...p, clips };
+  const next = { ...p, clips };
+  // Premier clip posé : le format de l'aperçu et de l'export suit celui des clips.
+  return p.clips.length === 0 ? { ...next, exportSettings: suggestExportSettings(next) } : next;
 }
 
 /** Rogne un clip : change son début et/ou sa fin dans le fichier source. */

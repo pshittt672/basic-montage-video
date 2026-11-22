@@ -571,3 +571,21 @@ code {
   user-select: text;
   font-size: 12px;
 }
+
+/* ----- Glisser depuis la bibliothèque ----- */
+.media-list li {
+  cursor: grab;
+}
+.drag-ghost {
+  position: fixed;
+  z-index: 20;
+  pointer-events: none;
+  padding: 4px 10px;
+  background: var(--clip);
+  border-radius: 6px;
+  font-size: 12px;
+  box-shadow: 0 4px 12px #0008;
+}
+.video-track.drop-over {
+  background: #2563eb22;
+}

@@ -8,10 +8,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Editor } from "../App";
+import { onLibraryDrag } from "../lib/libraryDrag";
 import {
   clipDuration,
   clipStarts,
   getMedia,
+  insertClip,
   moveClip,
   removeClip,
   setAllMuted,
@@ -36,10 +38,11 @@ function tickStep(pps: number): number {
   return 300;
 }
 
-function label(t: number): string {
+function label(t: number, step: number): string {
   const m = Math.floor(t / 60);
-  const s = Math.round(t - m * 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
+  const s = t - m * 60;
+  const sec = step < 1 ? s.toFixed(1).padStart(4, "0") : String(Math.round(s)).padStart(2, "0");
+  return `${m}:${sec}`;
 }
 
 export function Timeline({ editor, onSplit }: Props) {
@@ -47,6 +50,8 @@ export function Timeline({ editor, onSplit }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const [pps, setPps] = useState(40); // pixels par seconde (zoom)
   const [drag, setDrag] = useState<{ id: string; x: number; target: number } | null>(null);
+  const [libraryDrop, setLibraryDrop] = useState<number | null>(null); // position d'insertion
+  const videoTrack = useRef<HTMLDivElement>(null);
   const fitted = useRef(false);
 
   const total = totalDuration(project);
@@ -58,17 +63,17 @@ export function Timeline({ editor, onSplit }: Props) {
     selection?.kind === "clip" ? project.clips.find((c) => c.id === selection.id) : undefined;
   const allMuted = project.clips.length > 0 && project.clips.every((c) => c.muted);
 
-  const fit = () => {
+  /** Ajuste le zoom pour voir `len` secondes (par défaut tout le montage). */
+  const fit = (len = Math.max(total, 5)) => {
     const w = scroller.current?.clientWidth ?? 800;
-    const len = Math.max(total, 5);
     setPps(Math.max(2, Math.min(200, (w - PAD * 2 - 40) / len)));
   };
 
-  // Au premier import, on ajuste le zoom pour tout voir.
+  // Au premier clip posé, on règle le zoom pour voir environ une minute, ou toute la chanson.
   useLayoutEffect(() => {
     if (!fitted.current && total > 0) {
       fitted.current = true;
-      fit();
+      fit(Math.max(total, Math.min(musicMedia?.duration ?? 60, 240)));
     }
     if (total === 0) fitted.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -110,19 +115,10 @@ export function Timeline({ editor, onSplit }: Props) {
     const x0 = e.clientX;
     let moving = false;
     let target = project.clips.findIndex((c) => c.id === clip.id);
-    // Milieu des autres clips : on insère avant le premier milieu dépassé.
-    const others = project.clips.filter((c) => c.id !== clip.id);
-    const mids: number[] = [];
-    let t = 0;
-    for (const c of others) {
-      mids.push(t + clipDuration(c) / 2);
-      t += clipDuration(c);
-    }
     const move = (ev: PointerEvent) => {
       if (!moving && Math.abs(ev.clientX - x0) < 5) return;
       moving = true;
-      const at = timeAt(ev.clientX);
-      target = mids.filter((m) => m < at).length;
+      target = indexAt(timeAt(ev.clientX), clip.id);
       setDrag({ id: clip.id, x: ev.clientX - x0, target });
     };
     const up = () => {
@@ -161,6 +157,39 @@ export function Timeline({ editor, onSplit }: Props) {
     window.addEventListener("pointerup", up);
   };
 
+  /** Position d'insertion (index) correspondant à un instant de la timeline. */
+  const indexAt = (t: number, excludeId?: string) => {
+    let start = 0;
+    let index = 0;
+    for (const c of project.clips) {
+      if (c.id === excludeId) continue;
+      if (t < start + clipDuration(c) / 2) break;
+      start += clipDuration(c);
+      index++;
+    }
+    return index;
+  };
+
+  // Clip glissé depuis la bibliothèque : marqueur d'insertion, puis ajout au lâcher.
+  const dragRef = useRef({ project, indexAt, timeAt, apply });
+  dragRef.current = { project, indexAt, timeAt, apply };
+  useEffect(
+    () =>
+      onLibraryDrag((d) => {
+        const r = videoTrack.current?.getBoundingClientRect();
+        const over = !!r && d.clientX >= r.left && d.clientX <= r.right && d.clientY >= r.top - 20 && d.clientY <= r.bottom + 20;
+        const { project, indexAt, timeAt, apply } = dragRef.current;
+        const index = over ? indexAt(timeAt(d.clientX)) : null;
+        if (d.phase === "move") setLibraryDrop(index);
+        else {
+          setLibraryDrop(null);
+          const media = getMedia(project, d.mediaId);
+          if (d.phase === "drop" && index !== null && media) apply((p) => insertClip(p, media, index));
+        }
+      }),
+    [],
+  );
+
   // Graduations de la règle.
   const step = tickStep(pps);
   const ticks: number[] = [];
@@ -171,6 +200,8 @@ export function Timeline({ editor, onSplit }: Props) {
   if (drag) {
     const others = project.clips.filter((c) => c.id !== drag.id);
     dropX = PAD + others.slice(0, drag.target).reduce((s, c) => s + clipDuration(c), 0) * pps;
+  } else if (libraryDrop !== null) {
+    dropX = PAD + project.clips.slice(0, libraryDrop).reduce((s, c) => s + clipDuration(c), 0) * pps;
   }
 
   return (
@@ -205,7 +236,7 @@ export function Timeline({ editor, onSplit }: Props) {
             onChange={(e) => setPps(Math.exp(Number(e.target.value)))}
           />
         </span>
-        <button onClick={fit} title="Voir tout le montage">Tout voir</button>
+        <button onClick={() => fit()} title="Voir tout le montage">Tout voir</button>
       </div>
 
       <div className="tracks-wrap">
@@ -219,14 +250,14 @@ export function Timeline({ editor, onSplit }: Props) {
             <div className="ruler" onPointerDown={scrub}>
               {ticks.map((t) => (
                 <span key={t} className="tick" style={{ left: PAD + t * pps }}>
-                  {label(t)}
+                  {label(t, step)}
                 </span>
               ))}
             </div>
 
-            <div className="track video-track" onPointerDown={scrub}>
+            <div className={`track video-track ${libraryDrop !== null ? "drop-over" : ""}`} ref={videoTrack} onPointerDown={scrub}>
               {project.clips.length === 0 && (
-                <div className="track-empty">Les clips importés s'ajoutent ici, bout à bout.</div>
+                <div className="track-empty">Glisse ici les clips de la bibliothèque, dans l'ordre que tu veux.</div>
               )}
               {project.clips.map((clip, i) => (
                 <ClipBlock

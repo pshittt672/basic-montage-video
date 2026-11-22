@@ -6,8 +6,8 @@ Il est conçu d'abord pour réaliser un **clip musical** à partir de courts cli
 
 ## Ce que sait faire la version 1
 
-- **Importer** des vidéos (MP4, MOV, MKV, WEBM…) et une chanson (MP3, WAV, M4A…), avec le bouton « Importer » ou en glissant les fichiers dans la fenêtre. Les clips arrivent sur la timeline dans l'ordre de leur nom (clip_001, clip_002…).
-- **Couper le son des clips** : coché par défaut à l'import, réglable clip par clip ou pour tous les clips d'un coup.
+- **Importer** des vidéos (MP4, MOV, MKV, WEBM…) et une chanson (MP3, WAV, M4A…), avec le bouton « Importer » ou en glissant les fichiers dans la fenêtre. Les vidéos vont dans la bibliothèque ; c'est toi qui les poses sur la timeline, dans l'ordre que tu veux, en les y faisant glisser (ou par double-clic pour les ajouter à la fin).
+- **Couper le son des clips** : coché par défaut quand on pose un clip sur la timeline, réglable clip par clip ou pour tous les clips d'un coup.
 - **Timeline** avec une piste vidéo et une piste musique :
   - ranger les clips en les faisant glisser ;
   - les raccourcir en tirant sur leurs bords ;

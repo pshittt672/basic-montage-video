@@ -165,7 +165,7 @@ export function Inspector({ editor, onSplit }: Props) {
       <h2>Comment faire ?</h2>
       <ol>
         <li><strong>Importe</strong> tes clips vidéo et ta chanson.</li>
-        <li><strong>Range</strong> les clips en les faisant glisser sur la timeline.</li>
+        <li><strong>Pose</strong> les clips sur la timeline en les faisant glisser depuis la bibliothèque, dans l'ordre que tu veux. Tu peux ensuite les déplacer.</li>
         <li><strong>Raccourcis</strong> un clip en tirant sur ses bords, ou coupe-le en deux avec « Couper ici ».</li>
         <li>Clique sur la piste musique pour régler le <strong>volume</strong> et les <strong>fondus</strong>.</li>
         <li><strong>Exporte</strong> ta vidéo en MP4.</li>

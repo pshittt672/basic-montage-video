@@ -26,7 +26,6 @@ import {
   addMedia,
   clipAt,
   emptyProject,
-  insertClip,
   parseProject,
   PROJECT_EXTENSION,
   removeClip,
@@ -34,7 +33,6 @@ import {
   setClipMuted,
   setMusic,
   splitAt,
-  suggestExportSettings,
   totalDuration,
   type MediaItem,
   type Project,
@@ -112,7 +110,11 @@ export default function App() {
     window.setTimeout(() => setMessage((m) => (m === text ? null : m)), 6000);
   }, []);
 
-  /** Importe des fichiers : les vidéos vont sur la timeline, une chanson devient la musique. */
+  /**
+   * Importe des fichiers dans la bibliothèque. Les vidéos n'y sont que rangées :
+   * c'est l'utilisateur qui les pose sur la timeline, dans l'ordre qu'il veut.
+   * Une chanson importée devient la musique du montage.
+   */
   const importPaths = useCallback(
     async (paths: string[]) => {
       if (paths.length === 0) return;
@@ -127,20 +129,12 @@ export default function App() {
         }
       }
       setBusy(null);
-      // Tri par nom : les clips générés (clip_001, clip_002...) arrivent dans l'ordre.
-      const videos = items
-        .filter((m) => m.kind === "video")
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      // Rangement par nom dans la bibliothèque, pour retrouver facilement clip_001, clip_002...
+      items.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
       const song = items.find((m) => m.kind === "audio");
       apply((p) => {
-        let next = addMedia(p, items);
-        for (const v of videos) next = insertClip(next, v);
-        if (song) next = setMusic(next, song.id);
-        // Premier import : le format de l'aperçu et de l'export suit celui des clips.
-        if (p.clips.length === 0 && next.clips.length > 0) {
-          next = { ...next, exportSettings: suggestExportSettings(next) };
-        }
-        return next;
+        const next = addMedia(p, items);
+        return song ? setMusic(next, song.id) : next;
       });
       if (errors.length) flash(`Certains fichiers n'ont pas pu être importés :\n${errors.join("\n")}`);
     },
