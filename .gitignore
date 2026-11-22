@@ -27,6 +27,7 @@ dist-ssr
 src-tauri/target
 src-tauri/gen/schemas
 src-tauri/ffmpeg/*.exe
+src-tauri/ffmpeg/*.dll
 src-tauri/ffmpeg/ffmpeg
 src-tauri/ffmpeg/ffprobe
 src-tauri/ffmpeg/LICENCE-FFMPEG.txt

@@ -39,11 +39,11 @@ jobs:
       - name: Télécharger FFmpeg (build GPL de BtbN)
         shell: pwsh
         run: |
-          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip"
           Invoke-WebRequest $url -OutFile ffmpeg.zip
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-tmp
           $dir = Get-ChildItem ffmpeg-tmp | Select-Object -First 1
-          Copy-Item "$($dir.FullName)/bin/ffmpeg.exe", "$($dir.FullName)/bin/ffprobe.exe" src-tauri/ffmpeg/
+          Copy-Item "$($dir.FullName)/bin/ffmpeg.exe", "$($dir.FullName)/bin/ffprobe.exe", "$($dir.FullName)/bin/*.dll" src-tauri/ffmpeg/
           Copy-Item "$($dir.FullName)/LICENSE.txt" src-tauri/ffmpeg/LICENCE-FFMPEG.txt
           "$PWD/src-tauri/ffmpeg" | Out-File -FilePath $env:GITHUB_PATH -Append
 

@@ -1,3 +1,4 @@
-Ce dossier reçoit ffmpeg.exe et ffprobe.exe lors de la fabrication de
-l'installateur Windows (voir .github/workflows/build-windows.yml).
-Ils ne sont pas stockés dans le dépôt Git.
+Ce dossier reçoit FFmpeg (build « gpl-shared » de BtbN : ffmpeg.exe,
+ffprobe.exe et leurs bibliothèques .dll communes) lors de la fabrication
+de l'installateur Windows (voir .github/workflows/build-windows.yml).
+Ces fichiers ne sont pas stockés dans le dépôt Git.
