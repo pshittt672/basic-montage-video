@@ -29,3 +29,4 @@ src-tauri/gen/schemas
 src-tauri/ffmpeg/*.exe
 src-tauri/ffmpeg/ffmpeg
 src-tauri/ffmpeg/ffprobe
+src-tauri/ffmpeg/LICENCE-FFMPEG.txt
