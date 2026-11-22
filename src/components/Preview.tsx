@@ -8,6 +8,9 @@
  */
 
 import { useEffect, useRef } from "react";
+
+/** Permet au raccourci Échap de déclencher le bouton Stop. */
+export const stopRequest = { current: null as null | (() => void) };
 import type { Editor } from "../App";
 import { mediaUrl } from "../lib/backend";
 import {
@@ -45,7 +48,9 @@ export function musicGain(p: Project, t: number): number {
 }
 
 export function Preview({ editor }: { editor: Editor }) {
-  const { project, time, playing, setPlaying, seek } = editor;
+  const { project, time, playing, setPlaying, seek, tick: clock, pendingJump } = editor;
+  /** Endroit où la dernière lecture a commencé (pour le bouton Stop). */
+  const playStart = useRef(0);
   const videoA = useRef<HTMLVideoElement>(null);
   const videoB = useRef<HTMLVideoElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
@@ -57,6 +62,15 @@ export function Preview({ editor }: { editor: Editor }) {
   const duration = totalDuration(project);
   const musicMedia = project.music ? getMedia(project, project.music.mediaId) : undefined;
   const { width, height } = exportSize(project.exportSettings);
+  /** Stop : arrête la lecture et revient là où elle avait commencé. */
+  const stop = () => {
+    setPlaying(false);
+    seek(playStart.current);
+  };
+  stopRequest.current = stop;
+
+  /** Durée d'une image, selon la cadence d'export. */
+  const frame = 1 / (project.exportSettings.fps || 25);
 
   /** Fait jouer la chanson au bon endroit (elle peut commencer après le début). */
   const syncMusic = (t: number, isPlaying: boolean) => {
@@ -186,20 +200,28 @@ export function Preview({ editor }: { editor: Editor }) {
       setPlaying(false);
       return;
     }
+    playStart.current = t0;
+    pendingJump.current = null;
     const a = audio.current;
-    const wallStart = performance.now();
+    let wallStart = performance.now();
     let frame = 0;
     const tick = () => {
       const p = projectRef.current;
+      // Un saut (retour rapide, clic sur la règle...) a été demandé pendant la lecture.
+      if (pendingJump.current !== null) {
+        t0 = pendingJump.current;
+        pendingJump.current = null;
+        wallStart = performance.now();
+      }
       const t = t0 + (performance.now() - wallStart) / 1000;
       if (t >= totalDuration(p)) {
-        seek(totalDuration(p));
+        clock(totalDuration(p));
         setPlaying(false);
         return;
       }
       render(t, true);
       syncMusic(t, true);
-      seek(t);
+      clock(t);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -224,16 +246,39 @@ export function Preview({ editor }: { editor: Editor }) {
       </div>
       {musicMedia && <audio ref={audio} src={mediaUrl(musicMedia.path)} preload="auto" />}
       <div className="transport">
-        <button onClick={() => seek(0)} title="Aller au début (Début)">⏮</button>
+        <button onClick={() => seek(0)} disabled={duration === 0} title="Aller au début (touche Début)">⏮︎</button>
+        <button onClick={() => seek(time - 5)} disabled={duration === 0} title="Reculer de 5 secondes (Maj + ←)">
+          ⏪︎
+        </button>
+        <button onClick={() => seek(time - frame)} disabled={duration === 0 || playing} title="Image précédente (←)">
+          ◀|
+        </button>
         <button
           className="play"
           onClick={() => setPlaying(!playing)}
           disabled={duration === 0}
           title="Lecture / pause (barre d'espace)"
         >
-          {playing ? "⏸" : "▶"}
+          {playing ? "⏸︎" : "▶"}
         </button>
-        <button onClick={() => seek(duration)} title="Aller à la fin (Fin)">⏭</button>
+        <button
+          onClick={stop}
+          disabled={duration === 0}
+          title="Stop : arrête et revient là où la lecture avait commencé (Échap)"
+        >
+          ⏹︎
+        </button>
+        <button
+          onClick={() => seek(Math.min(duration, time + frame))}
+          disabled={duration === 0 || playing}
+          title="Image suivante (→)"
+        >
+          |▶
+        </button>
+        <button onClick={() => seek(Math.min(duration, time + 5))} disabled={duration === 0} title="Avancer de 5 secondes (Maj + →)">
+          ⏩︎
+        </button>
+        <button onClick={() => seek(duration)} disabled={duration === 0} title="Aller à la fin (touche Fin)">⏭︎</button>
         <span className="timecode">
           {formatTime(time)} / {formatTime(duration)}
         </span>

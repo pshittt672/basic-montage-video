@@ -265,7 +265,8 @@ export function Inspector({ editor, onSplit }: Props) {
         <li><kbd>B</kbd> marquer un temps fort (rythme)</li>
         <li><kbd>Suppr</kbd> supprimer le clip</li>
         <li><kbd>M</kbd> couper / remettre le son du clip</li>
-        <li><kbd>←</kbd> <kbd>→</kbd> image par image (<kbd>Maj</kbd> : 1 s)</li>
+        <li><kbd>Échap</kbd> stop (retour au point de départ)</li>
+        <li><kbd>←</kbd> <kbd>→</kbd> image par image (<kbd>Maj</kbd> : 5 s)</li>
         <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> annuler / rétablir</li>
         <li><kbd>Ctrl</kbd>+<kbd>S</kbd> enregistrer</li>
       </ul>

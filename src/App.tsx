@@ -4,11 +4,12 @@
  */
 
 import { ask } from "@tauri-apps/plugin-dialog";
+import type React from "react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ExportDialog } from "./components/ExportDialog";
 import { Inspector } from "./components/Inspector";
 import { Library } from "./components/Library";
-import { Preview } from "./components/Preview";
+import { Preview, stopRequest } from "./components/Preview";
 import { Timeline } from "./components/Timeline";
 import { Toolbar } from "./components/Toolbar";
 import {
@@ -55,7 +56,12 @@ export interface Editor {
   selection: Selection;
   select: (s: Selection) => void;
   time: number;
+  /** Déplace le curseur (aussi pendant la lecture). */
   seek: (t: number) => void;
+  /** Utilisé par l'horloge de lecture de l'aperçu, pour faire avancer le curseur. */
+  tick: (t: number) => void;
+  /** Saut demandé pendant la lecture, que l'horloge prend en compte. */
+  pendingJump: React.MutableRefObject<number | null>;
   playing: boolean;
   setPlaying: (p: boolean) => void;
   /** Pose un marqueur de rythme à la position du curseur. */
@@ -75,7 +81,13 @@ export default function App() {
   const [exportOpen, setExportOpen] = useState(false);
 
   const duration = totalDuration(project);
-  const seek = useCallback((t: number) => setTime(Math.max(0, t)), []);
+  const pendingJump = useRef<number | null>(null);
+  const seek = useCallback((t: number) => {
+    const clamped = Math.max(0, t);
+    pendingJump.current = clamped;
+    setTime(clamped);
+  }, []);
+  const tick = useCallback((t: number) => setTime(t), []);
   const apply = useCallback((change: (p: Project) => Project) => dispatch({ type: "apply", change }), []);
   const gesture = useRef({
     start: () => dispatch({ type: "gestureStart" }),
@@ -249,8 +261,9 @@ export default function App() {
       } else if (key === "m" && selection?.kind === "clip") {
         const clip = project.clips.find((c) => c.id === selection.id);
         if (clip) apply((p) => setClipMuted(p, clip.id, !clip.muted));
-      } else if (key === "arrowleft") seek(time - (e.shiftKey ? 1 : 1 / 25));
-      else if (key === "arrowright") seek(Math.min(duration, time + (e.shiftKey ? 1 : 1 / 25)));
+      } else if (key === "arrowleft") seek(time - (e.shiftKey ? 5 : 1 / project.exportSettings.fps));
+      else if (key === "arrowright") seek(Math.min(duration, time + (e.shiftKey ? 5 : 1 / project.exportSettings.fps)));
+      else if (key === "escape") stopRequest.current?.();
       else if (key === "home") seek(0);
       else if (key === "end") seek(duration);
       else return;
@@ -268,6 +281,8 @@ export default function App() {
     select,
     time,
     seek,
+    tick,
+    pendingJump,
     playing,
     setPlaying,
     addBeat: addBeatHere,
