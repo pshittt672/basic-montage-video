@@ -14,11 +14,23 @@ import {
   clipAt,
   clipDuration,
   exportSize,
+  fadeToBlackHalf,
   formatTime,
   getMedia,
+  overlapAfter,
+  sourceTime,
   totalDuration,
+  type Clip,
   type Project,
 } from "../model/project";
+
+/** Zoom lent de l'aperçu (le même que celui de l'export : 15 % sur toute la durée du clip). */
+function zoomTransform(clip: Clip, elapsed: number, dur: number): string {
+  const r = Math.max(0, Math.min(1, elapsed / dur));
+  if (clip.zoom === "in") return `scale(${1 + 0.15 * r})`;
+  if (clip.zoom === "out") return `scale(${1.15 - 0.15 * r})`;
+  return "none";
+}
 
 /** Volume de la musique à l'instant t de la timeline, fondus compris (de 0 à 1). */
 export function musicGain(p: Project, t: number): number {
@@ -37,6 +49,7 @@ export function Preview({ editor }: { editor: Editor }) {
   const videoA = useRef<HTMLVideoElement>(null);
   const videoB = useRef<HTMLVideoElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
+  const blackVeil = useRef<HTMLDivElement>(null);
   const active = useRef(0); // 0 = lecteur A visible, 1 = lecteur B visible
   const projectRef = useRef(project);
   projectRef.current = project;
@@ -60,61 +73,98 @@ export function Preview({ editor }: { editor: Editor }) {
     if (a.paused) void a.play().catch(() => {});
   };
 
+  /** Place un lecteur au bon endroit de son fichier, en lecture ou en pause. */
+  const drive = (v: HTMLVideoElement, local: number, speed: number, isPlaying: boolean) => {
+    v.playbackRate = speed;
+    if (!isPlaying) {
+      v.pause();
+      if (Math.abs(v.currentTime - local) > 0.01) v.currentTime = local;
+      return;
+    }
+    if (v.paused || Math.abs(v.currentTime - local) > 0.3) v.currentTime = local;
+    if (v.paused) void v.play().catch(() => {});
+  };
+
+  /** Charge un fichier dans un lecteur (s'il n'y est pas déjà). */
+  const load = (v: HTMLVideoElement, path: string) => {
+    if (v.dataset.path !== path) {
+      v.dataset.path = path;
+      v.src = mediaUrl(path);
+    }
+  };
+
   /** Affiche la bonne image de la timeline à l'instant t. */
   const render = (t: number, isPlaying: boolean) => {
     const p = projectRef.current;
     const players = [videoA.current, videoB.current];
-    if (!players[0] || !players[1]) return;
+    const veil = blackVeil.current;
+    if (!players[0] || !players[1] || !veil) return;
     const total = totalDuration(p);
     // Tout à la fin, on montre la dernière image du dernier clip.
     const hit = clipAt(p, Math.min(t, total - 0.001));
     if (!hit) {
       players.forEach((v) => v!.classList.remove("visible"));
+      veil.style.opacity = "0";
       return;
     }
-    const media = getMedia(p, hit.clip.mediaId);
+    const { clip, index, start } = hit;
+    const media = getMedia(p, clip.mediaId);
     if (!media) return;
-    const local = hit.clip.inPoint + (t - hit.start);
+    const dur = clipDuration(clip);
 
     let current = players[active.current]!;
-    if (current.dataset.path !== media.path) {
-      const other = players[1 - active.current]!;
-      if (other.dataset.path === media.path) {
-        // Le clip suivant était déjà prêt dans l'autre lecteur : on bascule.
-        current.pause();
-        active.current = 1 - active.current;
-        current = other;
-      } else {
-        current.dataset.path = media.path;
-        current.src = mediaUrl(media.path);
-      }
-    }
-    current.classList.add("visible");
-    players[1 - active.current]!.classList.remove("visible");
-    current.muted = hit.clip.muted || !media.hasAudio;
-
-    if (!isPlaying) {
+    let other = players[1 - active.current]!;
+    if (current.dataset.path !== media.path && other.dataset.path === media.path) {
+      // Le clip était déjà prêt dans l'autre lecteur : on bascule.
       current.pause();
-      if (Math.abs(current.currentTime - local) > 0.01) current.currentTime = local;
+      active.current = 1 - active.current;
+      [current, other] = [other, current];
+    }
+    load(current, media.path);
+    current.classList.add("visible");
+    current.style.opacity = "1";
+    current.style.zIndex = "1";
+    current.style.transform = zoomTransform(clip, t - start, dur);
+    current.muted = clip.muted || !media.hasAudio;
+    drive(current, sourceTime(clip, start, t), clip.speed || 1, isPlaying);
+
+    // Fondu au noir : un voile noir plus ou moins opaque.
+    const prev = p.clips[index - 1];
+    const next = p.clips[index + 1];
+    let black = 0;
+    if (prev?.transition?.kind === "black") {
+      const d = fadeToBlackHalf(prev, clip);
+      if (d > 0 && t - start < d) black = 1 - (t - start) / d;
+    }
+    if (clip.transition?.kind === "black" && next) {
+      const d = fadeToBlackHalf(clip, next);
+      if (d > 0 && start + dur - t < d) black = Math.max(black, 1 - (start + dur - t) / d);
+    }
+    veil.style.opacity = String(black);
+
+    // Fondu enchaîné : le clip suivant apparaît par-dessus, de plus en plus opaque.
+    const overlap = overlapAfter(p, index);
+    const nextMedia = next ? getMedia(p, next.mediaId) : undefined;
+    const usable = !!next && !!nextMedia && nextMedia.path !== media.path;
+    const nextStart = start + dur - overlap;
+    if (usable && overlap > 0 && t >= nextStart) {
+      load(other, nextMedia!.path);
+      other.classList.add("visible");
+      other.style.zIndex = "2";
+      other.style.opacity = String(Math.min(1, (t - nextStart) / overlap));
+      other.style.transform = zoomTransform(next!, t - nextStart, clipDuration(next!));
+      other.muted = next!.muted || !nextMedia!.hasAudio;
+      drive(other, sourceTime(next!, nextStart, t), next!.speed || 1, isPlaying);
       return;
     }
-    if (current.paused || Math.abs(current.currentTime - local) > 0.3) current.currentTime = local;
-    if (current.paused) void current.play().catch(() => {});
+    other.classList.remove("visible");
+    other.pause();
 
     // Prépare le clip suivant dans l'autre lecteur.
-    const next = p.clips[hit.index + 1];
-    const remaining = hit.start + clipDuration(hit.clip) - t;
-    if (next && remaining < 1.5) {
-      const nextMedia = getMedia(p, next.mediaId);
-      const other = players[1 - active.current]!;
-      if (nextMedia && nextMedia.path !== media.path && other.dataset.prepared !== next.id) {
-        other.dataset.prepared = next.id;
-        if (other.dataset.path !== nextMedia.path) {
-          other.dataset.path = nextMedia.path;
-          other.src = mediaUrl(nextMedia.path);
-        }
-        other.currentTime = next.inPoint;
-      }
+    if (isPlaying && usable && nextStart - t < 1.5 && other.dataset.prepared !== next!.id) {
+      other.dataset.prepared = next!.id;
+      load(other, nextMedia!.path);
+      other.currentTime = next!.inPoint;
     }
   };
 
@@ -168,6 +218,7 @@ export function Preview({ editor }: { editor: Editor }) {
         <div className="screen" style={{ aspectRatio: `${width} / ${height}` }}>
           <video ref={videoA} preload="auto" playsInline />
           <video ref={videoB} preload="auto" playsInline />
+          <div className="black-veil" ref={blackVeil} />
           {project.clips.length === 0 && <div className="screen-empty">Aperçu</div>}
         </div>
       </div>

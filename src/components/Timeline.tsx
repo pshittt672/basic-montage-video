@@ -4,14 +4,22 @@
  * - Cliquer sur la règle ou une zone vide déplace le curseur de lecture.
  * - Cliquer sur un clip le sélectionne ; le faire glisser change sa place.
  * - Tirer sur les bords d'un clip le raccourcit (rognage).
+ * - Les marqueurs de rythme (touche B) apparaissent en traits jaunes ; avec
+ *   l'aimantation, le curseur et les coupes viennent s'y caler.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Editor } from "../App";
 import { onLibraryDrag } from "../lib/libraryDrag";
+import { useWaveform } from "./Waveform";
 import {
+  beatTimes,
+  clearBeats,
   clipDuration,
   clipStarts,
+  overlapAfter,
+  removeBeatNear,
+  snapTo,
   getMedia,
   insertClip,
   moveClip,
@@ -66,6 +74,10 @@ export function Timeline({ editor, onSplit }: Props) {
   const selectedClip =
     selection?.kind === "clip" ? project.clips.find((c) => c.id === selection.id) : undefined;
   const allMuted = project.clips.length > 0 && project.clips.every((c) => c.muted);
+  const beats = beatTimes(project);
+  /** Aimantation : à moins de 10 pixels d'un marqueur (ou d'une coupe), on s'y cale. */
+  const snap = (t: number, extra: number[] = []) =>
+    project.snap ? snapTo(t, [...beats, ...extra], 10 / pps) : t;
 
   /** Ajuste le zoom pour voir `len` secondes (par défaut tout le montage). */
   const fit = (len = Math.max(total, 5)) => {
@@ -101,8 +113,9 @@ export function Timeline({ editor, onSplit }: Props) {
   /** Déplacer le curseur en cliquant (et en glissant) sur la règle. */
   const scrub = (e: ReactPointerEvent) => {
     if (e.button !== 0) return;
-    seek(timeAt(e.clientX));
-    const move = (ev: PointerEvent) => seek(timeAt(ev.clientX));
+    const at = (x: number) => snap(timeAt(x), [...starts, total]);
+    seek(at(e.clientX));
+    const move = (ev: PointerEvent) => seek(at(ev.clientX));
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -145,12 +158,20 @@ export function Timeline({ editor, onSplit }: Props) {
     e.stopPropagation();
     select({ kind: "clip", id: clip.id });
     const x0 = e.clientX;
+    const speed = clip.speed || 1;
+    const start = starts[project.clips.findIndex((c) => c.id === clip.id)];
     gesture.start();
     const move = (ev: PointerEvent) => {
-      const delta = (ev.clientX - x0) / pps;
-      gesture.update((p) =>
-        trimClip(p, clip.id, side === "in" ? { inPoint: clip.inPoint + delta } : { outPoint: clip.outPoint + delta }),
-      );
+      // Déplacement de la souris, converti en secondes de la vidéo source.
+      const delta = ((ev.clientX - x0) / pps) * speed;
+      // La fin du clip sur la timeline peut s'aimanter sur un marqueur de rythme.
+      if (side === "out") {
+        const end = snap(start + (clip.outPoint + delta - clip.inPoint) / speed);
+        gesture.update((p) => trimClip(p, clip.id, { outPoint: clip.inPoint + (end - start) * speed }));
+      } else {
+        const end = snap(start + (clip.outPoint - clip.inPoint - delta) / speed);
+        gesture.update((p) => trimClip(p, clip.id, { inPoint: clip.outPoint - (end - start) * speed }));
+      }
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -275,6 +296,27 @@ export function Timeline({ editor, onSplit }: Props) {
           {allMuted ? "🔊 Remettre le son des clips" : "🔇 Couper le son de tous les clips"}
         </button>
         <div className="spacer" />
+        <span className="rhythm" title="Pendant la lecture, tape B sur chaque temps fort de la chanson.">
+          <button className="ghost" onClick={() => editor.addBeat()} disabled={total === 0}>
+            ♩ Marquer le rythme (B)
+          </button>
+          <label className="check inline" title="Le curseur et les coupes se calent sur les marqueurs">
+            <input
+              type="checkbox"
+              checked={project.snap}
+              onChange={(e) => {
+                const on = e.target.checked;
+                apply((p) => ({ ...p, snap: on }));
+              }}
+            />
+            Aimantation
+          </label>
+          {beats.length > 0 && (
+            <button className="ghost" onClick={() => apply(clearBeats)} title="Effacer tous les marqueurs de rythme">
+              Effacer ({beats.length})
+            </button>
+          )}
+        </span>
         <span className="zoom">
           Zoom
           <input
@@ -297,7 +339,16 @@ export function Timeline({ editor, onSplit }: Props) {
         </div>
         <div className="scroller" ref={scroller}>
           <div className="tracks" style={{ width }}>
-            <div className="ruler" onPointerDown={scrub}>
+            <div
+              className="ruler"
+              onPointerDown={scrub}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                const t = timeAt(e.clientX);
+                apply((p) => removeBeatNear(p, t, 10 / pps));
+              }}
+              title={beats.length ? "Clic droit sur un marqueur jaune pour l'effacer" : undefined}
+            >
               {ticks.map((t) => (
                 <span key={t} className="tick" style={{ left: PAD + t * pps }}>
                   {label(t, step)}
@@ -317,6 +368,7 @@ export function Timeline({ editor, onSplit }: Props) {
                   name={getMedia(project, clip.mediaId)?.name ?? "?"}
                   hasAudio={getMedia(project, clip.mediaId)?.hasAudio ?? false}
                   left={PAD + starts[i] * pps + (drag?.id === clip.id ? drag.x : 0)}
+                  zIndex={i}
                   width={clipDuration(clip) * pps}
                   selected={selection?.kind === "clip" && selection.id === clip.id}
                   dragging={drag?.id === clip.id}
@@ -325,6 +377,20 @@ export function Timeline({ editor, onSplit }: Props) {
                   onToggleMute={() => apply((p) => setClipMuted(p, clip.id, !clip.muted))}
                 />
               ))}
+              {project.clips.map((clip, i) =>
+                clip.transition && i < project.clips.length - 1 ? (
+                  <button
+                    key={`t-${clip.id}`}
+                    className="transition-badge"
+                    style={{ left: PAD + (starts[i + 1] + overlapAfter(project, i) / 2) * pps - 11 }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => select({ kind: "clip", id: clip.id })}
+                    title={`${clip.transition.kind === "crossfade" ? "Fondu enchaîné" : "Fondu au noir"} (${clip.transition.duration} s)`}
+                  >
+                    {clip.transition.kind === "crossfade" ? "⧓" : "■"}
+                  </button>
+                ) : null,
+              )}
               {dropX !== null && <div className="drop-marker" style={{ left: dropX - 2 }} />}
             </div>
 
@@ -340,6 +406,7 @@ export function Timeline({ editor, onSplit }: Props) {
                   onPointerDown={startMusicMove}
                   title="Glisser pour choisir le moment où la chanson commence"
                 >
+                  <WaveformCanvas path={musicMedia.path} width={musicMedia.duration * pps} />
                   <span className="clip-name">♪ {musicMedia.name}</span>
                   {project.music.start + musicMedia.duration > total && total > 0 && (
                     <div
@@ -357,6 +424,9 @@ export function Timeline({ editor, onSplit }: Props) {
               {musicDrop !== null && <div className="drop-marker" style={{ left: PAD + musicDrop * pps - 2 }} />}
             </div>
 
+            {beats.map((b) => (
+              <div key={b} className="beat" style={{ left: PAD + b * pps }} />
+            ))}
             <div className="playhead" style={{ left: PAD + time * pps }} />
           </div>
         </div>
@@ -374,6 +444,7 @@ interface ClipProps {
   width: number;
   selected: boolean;
   dragging: boolean;
+  zIndex: number;
   onMoveStart: (e: ReactPointerEvent) => void;
   onTrimStart: (e: ReactPointerEvent, side: "in" | "out") => void;
   onToggleMute: () => void;
@@ -387,13 +458,20 @@ function ClipBlock(p: ClipProps) {
       style={{
         left: p.left,
         width: Math.max(4, p.width),
+        zIndex: p.dragging ? 50 : p.zIndex,
         backgroundImage: thumb ? `url(${thumb})` : undefined,
       }}
       onPointerDown={p.onMoveStart}
-      title={`${p.name} : ${(p.clip.outPoint - p.clip.inPoint).toFixed(1)} s`}
+      title={`${p.name} : ${((p.clip.outPoint - p.clip.inPoint) / (p.clip.speed || 1)).toFixed(1)} s`}
     >
       <div className="handle left" onPointerDown={(e) => p.onTrimStart(e, "in")} title="Tirer pour rogner le début" />
       {p.width > 50 && <span className="clip-name">{p.name}</span>}
+      {p.width > 40 && (p.clip.speed !== 1 || p.clip.zoom !== "none") && (
+        <span className="clip-badges">
+          {p.clip.speed !== 1 && `×${p.clip.speed}`}
+          {p.clip.zoom !== "none" && " 🔍"}
+        </span>
+      )}
       {p.hasAudio && p.width > 30 && (
         <button
           className={`mute ${p.clip.muted ? "on" : ""}`}
@@ -407,4 +485,30 @@ function ClipBlock(p: ClipProps) {
       <div className="handle right" onPointerDown={(e) => p.onTrimStart(e, "out")} title="Tirer pour rogner la fin" />
     </div>
   );
+}
+
+/** Dessine la forme d'onde de la chanson (les pics montrent les temps forts). */
+function WaveformCanvas({ path, width }: { path: string; width: number }) {
+  const peaks = useWaveform(path);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  // Un canevas ne peut pas être infiniment large : au-delà, l'image est étirée.
+  const w = Math.max(1, Math.min(Math.round(width), 16000));
+  useEffect(() => {
+    const c = canvas.current;
+    const ctx = c?.getContext("2d");
+    if (!c || !ctx || !peaks) return;
+    const h = c.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    const per = peaks.length / w;
+    for (let x = 0; x < w; x++) {
+      let max = 0;
+      const from = Math.floor(x * per);
+      const to = Math.max(from + 1, Math.floor((x + 1) * per));
+      for (let i = from; i < to && i < peaks.length; i++) max = Math.max(max, peaks[i]);
+      const bar = (max / 255) * h;
+      ctx.fillRect(x, (h - bar) / 2, 1, bar);
+    }
+  }, [peaks, w]);
+  return <canvas ref={canvas} className="waveform" width={w} height={40} />;
 }

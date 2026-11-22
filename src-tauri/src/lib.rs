@@ -124,6 +124,16 @@ async fn thumbnail(app: AppHandle, path: String, at: f64) -> Result<tauri::ipc::
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Forme d'onde d'une chanson (50 valeurs par seconde, de 0 à 255).
+#[tauri::command]
+async fn waveform(app: AppHandle, path: String) -> Result<tauri::ipc::Response, String> {
+    let ffmpeg_path = ffmpeg::find_tool("ffmpeg", resource_dir(&app).as_deref());
+    let bytes = tauri::async_runtime::spawn_blocking(move || ffmpeg::waveform(&ffmpeg_path, &path))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Lit un fichier texte (utilisé pour ouvrir un projet).
 #[tauri::command]
 fn read_text_file(path: String) -> Result<String, String> {
@@ -151,6 +161,7 @@ pub fn run() {
             check_ffmpeg,
             probe_media,
             thumbnail,
+            waveform,
             export_video,
             cancel_export,
             read_text_file,

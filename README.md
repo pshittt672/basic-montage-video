@@ -19,7 +19,14 @@ Il est conçu d'abord pour réaliser un **clip musical** à partir de courts cli
 - **Annuler / Rétablir** (<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>).
 - **Enregistrer le projet** (fichier `.montage`) pour le rouvrir plus tard.
 
-Prévu ensuite : forme d'onde de la chanson, marqueurs de rythme avec aimantation des coupes, transitions (fondu enchaîné, fondu au noir), vitesse des clips, zoom lent.
+### Fonctions avancées (discrètes, pour aller plus loin)
+
+- **Forme d'onde** de la chanson sur la piste musique, pour repérer les temps forts.
+- **Marqueurs de rythme** : pendant la lecture, tape <kbd>B</kbd> sur chaque temps fort. Avec l'**aimantation**, le curseur et les bords des clips viennent se caler dessus : les coupes tombent en rythme. Les marqueurs suivent la chanson si on la déplace ; clic droit sur la règle pour en effacer un.
+- **Effets d'un clip** (panneau de droite, rubrique « Effets ») : vitesse (ralenti ou accéléré), zoom lent avant ou arrière, transition vers le clip suivant (fondu enchaîné ou fondu au noir).
+- **Harmonisation automatique** : à l'export, tous les clips sont mis à la même taille et à la même cadence.
+
+Prévu plus tard : texte animé, images clés, réglages de couleur.
 
 ## Installer le logiciel sous Windows
 
@@ -44,7 +51,7 @@ Le logiciel utilise [Tauri 2](https://tauri.app) : l'interface est une page web 
 | `src/state/history.ts` | Annuler / Rétablir |
 | `src/components/` | Les zones de l'écran : bibliothèque, aperçu, timeline, réglages, export |
 | `src/lib/backend.ts` | Les appels vers la partie Rust |
-| `src-tauri/src/ffmpeg.rs` | Lecture des fichiers et construction de la commande d'export FFmpeg |
+| `src-tauri/src/ffmpeg.rs` | Lecture des fichiers, forme d'onde et construction de la commande d'export FFmpeg |
 | `src-tauri/src/lib.rs` | Les commandes appelées par l'interface |
 
 ### Lancer en mode développement

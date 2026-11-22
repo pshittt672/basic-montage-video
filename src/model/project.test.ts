@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  addBeat,
+  beatTimes,
   buildExportPlan,
+  clipStarts,
+  removeBeatNear,
+  setClipSpeed,
+  setClipTransition,
+  snapTo,
   clipAt,
   emptyProject,
   formatTime,
@@ -66,6 +73,46 @@ describe("timeline", () => {
   it("coupe ou remet le son de tous les clips", () => {
     const p = setAllMuted(withClips(video("a"), video("b")), false);
     expect(p.clips.some((c) => c.muted)).toBe(false);
+  });
+});
+
+describe("niveau 2", () => {
+  it("un ralenti allonge le clip, et la coupe en tient compte", () => {
+    let p = withClips(video("a"));
+    p = setClipSpeed(p, p.clips[0].id, 0.5);
+    expect(totalDuration(p)).toBe(20);
+    p = splitAt(p, 4);
+    expect(p.clips[0].outPoint).toBe(2); // 4 s de timeline = 2 s de vidéo au ralenti
+  });
+
+  it("un fondu enchaîné fait se chevaucher deux clips", () => {
+    let p = withClips(video("a"), video("b"));
+    p = setClipTransition(p, p.clips[0].id, { kind: "crossfade", duration: 1 });
+    expect(clipStarts(p)).toEqual([0, 9]);
+    expect(totalDuration(p)).toBe(19);
+    const plan = buildExportPlan(p, "o.mp4");
+    expect(plan.segments[0].crossfadeNext).toBe(1);
+    // Un fondu au noir ne raccourcit pas le montage.
+    p = setClipTransition(p, p.clips[0].id, { kind: "black", duration: 1 });
+    expect(totalDuration(p)).toBe(20);
+    const plan2 = buildExportPlan(p, "o.mp4");
+    expect([plan2.segments[0].fadeOutBlack, plan2.segments[1].fadeInBlack]).toEqual([0.5, 0.5]);
+  });
+
+  it("les marqueurs de rythme suivent la chanson", () => {
+    const song: MediaItem = { ...video("song", 100), kind: "audio" };
+    let p = setMusic({ ...withClips(video("a")), media: [song] }, "song", 2);
+    p = addBeat(p, 3);
+    p = addBeat(p, 3.01); // trop près : ignoré
+    expect(p.beats).toEqual([1]);
+    p = setMusic(p, "song", 5);
+    expect(beatTimes(p)).toEqual([6]);
+    expect(removeBeatNear(p, 6.1, 0.2).beats).toEqual([]);
+  });
+
+  it("aimante sur le point le plus proche", () => {
+    expect(snapTo(2.1, [1, 2, 3], 0.2)).toBe(2);
+    expect(snapTo(2.5, [1, 2, 3], 0.2)).toBe(2.5);
   });
 });
 

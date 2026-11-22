@@ -12,6 +12,10 @@ import {
   removeClip,
   removeMusic,
   setClipMuted,
+  setClipSpeed,
+  setClipTransition,
+  setClipZoom,
+  SPEEDS,
   totalDuration,
   trimClip,
   updateMusic,
@@ -61,6 +65,7 @@ export function Inspector({ editor, onSplit }: Props) {
     const clip = project.clips.find((c) => c.id === selection.id);
     const media = clip && getMedia(project, clip.mediaId);
     if (!clip || !media) return <aside className="panel inspector" />;
+    const isLast = project.clips[project.clips.length - 1]?.id === clip.id;
     const trim = (change: { inPoint?: number; outPoint?: number }) =>
       gesture.update((p) => trimClip(p, clip.id, change));
     return (
@@ -68,7 +73,7 @@ export function Inspector({ editor, onSplit }: Props) {
         <h2>Clip sélectionné</h2>
         <p className="name" title={media.path}>{media.name}</p>
         <p className="meta">
-          Durée gardée : <strong>{formatTime(clipDuration(clip))}</strong> sur {formatTime(media.duration)}
+          Durée sur la timeline : <strong>{formatTime(clipDuration(clip))}</strong> (vidéo de {formatTime(media.duration)})
         </p>
         <Slider
           label="Début"
@@ -110,6 +115,76 @@ export function Inspector({ editor, onSplit }: Props) {
           <button onClick={() => apply((p) => duplicateClip(p, clip.id))}>Dupliquer</button>
           <button className="danger" onClick={() => apply((p) => removeClip(p, clip.id))}>Supprimer</button>
         </div>
+
+        <details className="more" open={clip.speed !== 1 || clip.zoom !== "none" || !!clip.transition}>
+          <summary>Effets : vitesse, zoom, transition</summary>
+          <label>
+            Vitesse
+            <select
+              value={clip.speed}
+              onChange={(e) => {
+                const speed = Number(e.target.value);
+                apply((p) => setClipSpeed(p, clip.id, speed));
+              }}
+            >
+              {SPEEDS.map((v) => (
+                <option key={v} value={v}>
+                  {v === 1 ? "Normale" : v < 1 ? `Ralenti ×${v}` : `Accéléré ×${v}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Zoom lent
+            <select
+              value={clip.zoom}
+              onChange={(e) => {
+                const zoom = e.target.value as typeof clip.zoom;
+                apply((p) => setClipZoom(p, clip.id, zoom));
+              }}
+            >
+              <option value="none">Aucun</option>
+              <option value="in">On s'approche (zoom avant)</option>
+              <option value="out">On s'éloigne (zoom arrière)</option>
+            </select>
+          </label>
+          {isLast ? (
+            <p className="hint">Dernier clip : pas de transition après lui.</p>
+          ) : (
+            <>
+              <label>
+                Transition vers le clip suivant
+                <select
+                  value={clip.transition?.kind ?? "none"}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const transition =
+                      v === "none" ? null : { kind: v as "crossfade" | "black", duration: clip.transition?.duration ?? 1 };
+                    apply((p) => setClipTransition(p, clip.id, transition));
+                  }}
+                >
+                  <option value="none">Aucune (coupe franche)</option>
+                  <option value="crossfade">Fondu enchaîné</option>
+                  <option value="black">Fondu au noir</option>
+                </select>
+              </label>
+              {clip.transition && (
+                <Slider
+                  label="Durée de la transition"
+                  value={clip.transition.duration}
+                  min={0.2}
+                  max={3}
+                  step={0.1}
+                  unit=" s"
+                  onChange={(duration) =>
+                    gesture.update((p) => setClipTransition(p, clip.id, { ...clip.transition!, duration }))
+                  }
+                  gesture={gesture}
+                />
+              )}
+            </>
+          )}
+        </details>
       </aside>
     );
   }
@@ -187,6 +262,7 @@ export function Inspector({ editor, onSplit }: Props) {
       <ul className="keys">
         <li><kbd>Espace</kbd> lecture / pause</li>
         <li><kbd>S</kbd> couper ici</li>
+        <li><kbd>B</kbd> marquer un temps fort (rythme)</li>
         <li><kbd>Suppr</kbd> supprimer le clip</li>
         <li><kbd>M</kbd> couper / remettre le son du clip</li>
         <li><kbd>←</kbd> <kbd>→</kbd> image par image (<kbd>Maj</kbd> : 1 s)</li>

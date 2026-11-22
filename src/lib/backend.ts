@@ -65,6 +65,19 @@ export function thumbnailUrl(path: string, at = 0.5): Promise<string> {
   return p;
 }
 
+const waveformCache = new Map<string, Promise<Uint8Array>>();
+
+/** Forme d'onde d'une chanson : 50 valeurs par seconde, de 0 (silence) à 255. */
+export function waveform(path: string): Promise<Uint8Array> {
+  let p = waveformCache.get(path);
+  if (!p) {
+    p = invoke<ArrayBuffer>("waveform", { path }).then((b) => new Uint8Array(b));
+    p.catch(() => waveformCache.delete(path));
+    waveformCache.set(path, p);
+  }
+  return p;
+}
+
 export async function pickMediaFiles(): Promise<string[]> {
   const result = await open({
     multiple: true,

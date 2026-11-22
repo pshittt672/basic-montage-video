@@ -23,6 +23,7 @@ import {
   writeTextFile,
 } from "./lib/backend";
 import {
+  addBeat,
   addMedia,
   clipAt,
   emptyProject,
@@ -57,6 +58,8 @@ export interface Editor {
   seek: (t: number) => void;
   playing: boolean;
   setPlaying: (p: boolean) => void;
+  /** Pose un marqueur de rythme à la position du curseur. */
+  addBeat: () => void;
 }
 
 export default function App() {
@@ -212,11 +215,23 @@ export default function App() {
     if (hit) select({ kind: "clip", id: hit.clip.id });
   }, [apply, project, time]);
 
+  const timeRef = useRef(time);
+  timeRef.current = time;
+  const addBeatHere = useCallback(() => {
+    const t = timeRef.current;
+    apply((p) => addBeat(p, t));
+  }, [apply]);
+
   // Raccourcis clavier.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (target.closest("input, select, textarea")) return;
+      // Dans une zone de texte, les touches servent à écrire.
+      if (target.closest("textarea, input:not([type=range]):not([type=checkbox])")) return;
+      // Sur un curseur, les flèches servent à le régler.
+      if (target.matches("input[type=range]") && e.key.startsWith("Arrow")) return;
+      // Sur une liste ou une case à cocher, on rend la main aux raccourcis.
+      if (target.matches("select, input[type=checkbox], input[type=range]")) target.blur();
       const ctrl = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
       if (ctrl && key === "z" && !e.shiftKey) dispatch({ type: "undo" });
@@ -228,6 +243,7 @@ export default function App() {
       else if (ctrl) return;
       else if (key === " ") setPlaying((p) => !p);
       else if (key === "s") splitHere();
+      else if (key === "b") addBeatHere();
       else if ((key === "delete" || key === "backspace") && selection?.kind === "clip") {
         apply((p) => removeClip(p, selection.id));
       } else if (key === "m" && selection?.kind === "clip") {
@@ -244,7 +260,18 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  const editor: Editor = { project, apply, gesture, selection, select, time, seek, playing, setPlaying };
+  const editor: Editor = {
+    project,
+    apply,
+    gesture,
+    selection,
+    select,
+    time,
+    seek,
+    playing,
+    setPlaying,
+    addBeat: addBeatHere,
+  };
 
   return (
     <div className="app">

@@ -171,6 +171,40 @@ pub fn thumbnail(ffmpeg: &Path, file: &str, at: f64) -> Result<Vec<u8>, String> 
     Ok(out.stdout)
 }
 
+/// Nombre de valeurs de forme d'onde par seconde de son.
+pub const WAVEFORM_RATE: usize = 50;
+
+/// Calcule la forme d'onde d'un fichier son : pour chaque 1/50 de seconde,
+/// l'intensité maximale, de 0 (silence) à 255 (le plus fort).
+pub fn waveform(ffmpeg: &Path, file: &str) -> Result<Vec<u8>, String> {
+    const SAMPLE_RATE: usize = 8000;
+    let out = command(ffmpeg)
+        .args(["-v", "error", "-i", file, "-vn", "-ac", "1", "-ar"])
+        .arg(SAMPLE_RATE.to_string())
+        .args(["-f", "s16le", "-acodec", "pcm_s16le", "-"])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|_| "FFmpeg est introuvable.".to_string())?;
+    if !out.status.success() {
+        return Err("Impossible de lire le son de ce fichier.".into());
+    }
+    Ok(peaks(&out.stdout, SAMPLE_RATE / WAVEFORM_RATE))
+}
+
+/// Réduit des échantillons 16 bits à une valeur maximale par paquet.
+fn peaks(pcm: &[u8], per_bucket: usize) -> Vec<u8> {
+    pcm.chunks(per_bucket * 2)
+        .map(|chunk| {
+            let max = chunk
+                .chunks_exact(2)
+                .map(|b| i16::from_le_bytes([b[0], b[1]]).unsigned_abs())
+                .max()
+                .unwrap_or(0);
+            (max as u32 * 255 / 32768) as u8
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
@@ -185,6 +219,31 @@ pub struct ExportSegment {
     pub out_point: f64,
     /// Faut-il garder le son d'origine du clip ?
     pub keep_audio: bool,
+    /// Vitesse : 1 = normale, 0.5 = ralenti, 2 = accéléré.
+    #[serde(default = "one")]
+    pub speed: f64,
+    /// Zoom lent : « none », « in » (on s'approche) ou « out » (on s'éloigne).
+    #[serde(default)]
+    pub zoom: String,
+    /// Fondu depuis le noir au début, et vers le noir à la fin (secondes).
+    #[serde(default)]
+    pub fade_in_black: f64,
+    #[serde(default)]
+    pub fade_out_black: f64,
+    /// Durée du fondu enchaîné avec le clip suivant (secondes).
+    #[serde(default)]
+    pub crossfade_next: f64,
+}
+
+fn one() -> f64 {
+    1.0
+}
+
+impl ExportSegment {
+    /// Durée du morceau dans le film (vitesse comprise).
+    pub fn duration(&self) -> f64 {
+        (self.out_point - self.in_point).max(0.0) / self.speed.max(0.01)
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -212,13 +271,43 @@ pub struct ExportPlan {
 }
 
 impl ExportPlan {
-    /// Durée totale du film, égale à la somme des morceaux vidéo.
+    /// Chevauchement réel entre le morceau `i` et le suivant (fondu enchaîné).
+    fn overlap_after(&self, i: usize) -> f64 {
+        match (self.segments.get(i), self.segments.get(i + 1)) {
+            (Some(a), Some(b)) => a
+                .crossfade_next
+                .max(0.0)
+                .min(a.duration() / 2.0)
+                .min(b.duration() / 2.0),
+            _ => 0.0,
+        }
+    }
+
+    /// Durée totale du film : les morceaux bout à bout, moins les chevauchements.
     pub fn duration(&self) -> f64 {
-        self.segments
-            .iter()
-            .map(|s| (s.out_point - s.in_point).max(0.0))
+        (0..self.segments.len())
+            .map(|i| self.segments[i].duration() - self.overlap_after(i))
             .sum()
     }
+}
+
+/// Filtre audio de changement de vitesse sans changer la hauteur du son.
+/// `atempo` n'accepte qu'un facteur entre 0,5 et 2 : on l'enchaîne si besoin.
+fn atempo_chain(speed: f64) -> String {
+    let mut parts = Vec::new();
+    let mut s = speed;
+    while s < 0.5 {
+        parts.push("atempo=0.5".to_string());
+        s /= 0.5;
+    }
+    while s > 2.0 {
+        parts.push("atempo=2".to_string());
+        s /= 2.0;
+    }
+    if (s - 1.0).abs() > 1e-6 {
+        parts.push(format!("atempo={}", num(s)));
+    }
+    parts.join(",")
 }
 
 /// Écrit un nombre avec au plus 3 décimales (« 1.5 », « 2 »).
@@ -240,32 +329,61 @@ pub fn build_export_args(plan: &ExportPlan) -> Result<Vec<String>, String> {
     let total = plan.duration();
     let mut args: Vec<String> = vec!["-y".into(), "-hide_banner".into()];
     let mut filters: Vec<String> = Vec::new();
-    let mut concat_inputs = String::new();
 
     for (i, seg) in plan.segments.iter().enumerate() {
-        let dur = seg.out_point - seg.in_point;
-        if dur <= 0.0 {
+        let src = seg.out_point - seg.in_point;
+        if src <= 0.0 {
             return Err(format!("Le clip n°{} a une durée nulle.", i + 1));
         }
+        let speed = seg.speed.max(0.01);
+        let dur = seg.duration();
         args.extend([
             "-ss".into(),
             num(seg.in_point),
             "-t".into(),
-            num(dur),
+            num(src),
             "-i".into(),
             seg.path.clone(),
         ]);
-        // Image : même taille (bandes noires si le format diffère) et même cadence.
-        filters.push(format!(
-            "[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,\
-             pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps={fps},\
-             format=yuv420p,trim=duration={d},setpts=PTS-STARTPTS[v{i}]",
+        // Image : vitesse, même taille (bandes noires si le format diffère), même cadence.
+        let mut v = format!(
+            "[{i}:v]setpts=(PTS-STARTPTS)/{sp},\
+             scale={w}:{h}:force_original_aspect_ratio=decrease,\
+             pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps={fps}",
+            sp = num(speed)
+        );
+        // Zoom lent : on agrandit l'image peu à peu (ou l'inverse) en gardant le centre.
+        let zoom = match seg.zoom.as_str() {
+            "in" => Some(format!("(1+0.15*t/{})", num(dur))),
+            "out" => Some(format!("(1.15-0.15*t/{})", num(dur))),
+            _ => None,
+        };
+        if let Some(z) = zoom {
+            v.push_str(&format!(
+                ",scale=w='2*trunc({w}*{z}/2)':h='2*trunc({h}*{z}/2)':eval=frame,crop={w}:{h}"
+            ));
+        }
+        if seg.fade_in_black > 0.0 {
+            v.push_str(&format!(",fade=t=in:st=0:d={}", num(seg.fade_in_black)));
+        }
+        if seg.fade_out_black > 0.0 {
+            v.push_str(&format!(
+                ",fade=t=out:st={}:d={}",
+                num((dur - seg.fade_out_black).max(0.0)),
+                num(seg.fade_out_black)
+            ));
+        }
+        v.push_str(&format!(
+            ",format=yuv420p,trim=duration={d},setpts=PTS-STARTPTS[v{i}]",
             d = num(dur)
         ));
-        // Son : celui du clip, ou un silence de la même durée.
+        filters.push(v);
+        // Son : celui du clip (à la même vitesse), ou un silence de la même durée.
         if seg.keep_audio {
+            let tempo = atempo_chain(speed);
+            let tempo = if tempo.is_empty() { String::new() } else { format!("{tempo},") };
             filters.push(format!(
-                "[{i}:a]aresample=48000,aformat=channel_layouts=stereo,\
+                "[{i}:a]asetpts=PTS-STARTPTS,{tempo}aresample=48000,aformat=channel_layouts=stereo,\
                  apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]",
                 d = num(dur)
             ));
@@ -275,10 +393,31 @@ pub fn build_export_args(plan: &ExportPlan) -> Result<Vec<String>, String> {
                 d = num(dur)
             ));
         }
-        concat_inputs.push_str(&format!("[v{i}][a{i}]"));
     }
+
+    // Assemblage, morceau par morceau : fondu enchaîné (xfade) ou mise bout à bout (concat).
     let n = plan.segments.len();
-    filters.push(format!("{concat_inputs}concat=n={n}:v=1:a=1[vout][clips]"));
+    let (mut vacc, mut aacc) = ("v0".to_string(), "a0".to_string());
+    let mut length = plan.segments[0].duration();
+    for i in 1..n {
+        let (vo, ao) = (format!("vx{i}"), format!("ax{i}"));
+        let overlap = plan.overlap_after(i - 1);
+        if overlap > 0.0 {
+            filters.push(format!(
+                "[{vacc}][v{i}]xfade=transition=fade:duration={d}:offset={o}[{vo}]",
+                d = num(overlap),
+                o = num(length - overlap)
+            ));
+            filters.push(format!("[{aacc}][a{i}]acrossfade=d={d}[{ao}]", d = num(overlap)));
+            length += plan.segments[i].duration() - overlap;
+        } else {
+            filters.push(format!("[{vacc}][{aacc}][v{i}][a{i}]concat=n=2:v=1:a=1[{vo}][{ao}]"));
+            length += plan.segments[i].duration();
+        }
+        (vacc, aacc) = (vo, ao);
+    }
+    filters.push(format!("[{vacc}]null[vout]"));
+    filters.push(format!("[{aacc}]anull[clips]"));
 
     // La chanson n'est gardée que si elle commence avant la fin du film.
     let music = plan.music.as_ref().filter(|m| m.start.max(0.0) < total);
@@ -352,6 +491,21 @@ pub fn build_export_args(plan: &ExportPlan) -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
 
+    /// Morceau par défaut pour les tests.
+    fn seg() -> ExportSegment {
+        ExportSegment {
+            path: String::new(),
+            in_point: 0.0,
+            out_point: 1.0,
+            keep_audio: false,
+            speed: 1.0,
+            zoom: String::new(),
+            fade_in_black: 0.0,
+            fade_out_black: 0.0,
+            crossfade_next: 0.0,
+        }
+    }
+
     #[test]
     fn lit_la_cadence() {
         assert_eq!(parse_rate("30/1"), Some(30.0));
@@ -386,8 +540,8 @@ mod tests {
     fn construit_un_export() {
         let plan = ExportPlan {
             segments: vec![
-                ExportSegment { path: "a.mp4".into(), in_point: 1.0, out_point: 4.0, keep_audio: false },
-                ExportSegment { path: "b.mp4".into(), in_point: 0.0, out_point: 2.5, keep_audio: true },
+                ExportSegment { path: "a.mp4".into(), in_point: 1.0, out_point: 4.0, keep_audio: false, ..seg() },
+                ExportSegment { path: "b.mp4".into(), in_point: 0.0, out_point: 2.5, keep_audio: true, ..seg() },
             ],
             music: Some(ExportMusic { path: "song.mp3".into(), start: 0.0, volume: 0.8, fade_in: 1.0, fade_out: 2.0 }),
             width: 1920,
@@ -399,15 +553,53 @@ mod tests {
         let args = build_export_args(&plan).unwrap();
         let filter = &args[args.iter().position(|a| a == "-filter_complex").unwrap() + 1];
         assert!(filter.contains("anullsrc=r=48000:cl=stereo,atrim=duration=3[a0]"));
-        assert!(filter.contains("[1:a]aresample"));
+        assert!(filter.contains("[1:a]asetpts=PTS-STARTPTS,aresample"));
         assert!(filter.contains("concat=n=2:v=1:a=1"));
         assert!(filter.contains("afade=t=out:st=3.5:d=2"));
         assert_eq!(args.last().unwrap(), "out.mp4");
     }
 
     #[test]
+    fn calcule_les_pics_de_son() {
+        let pcm: Vec<u8> = [0i16, 100, -32768, 5, 16384, 0]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        assert_eq!(peaks(&pcm, 3), vec![255, 127]);
+    }
+
+    #[test]
+    fn vitesse_fondus_et_zoom() {
+        assert_eq!(atempo_chain(1.0), "");
+        assert_eq!(atempo_chain(0.25), "atempo=0.5,atempo=0.5");
+        assert_eq!(atempo_chain(3.0), "atempo=2,atempo=1.5");
+        let plan = ExportPlan {
+            segments: vec![
+                ExportSegment { out_point: 4.0, speed: 0.5, crossfade_next: 1.0, keep_audio: true, ..seg() },
+                ExportSegment { out_point: 6.0, zoom: "in".into(), fade_out_black: 0.5, ..seg() },
+                ExportSegment { out_point: 6.0, fade_in_black: 0.5, ..seg() },
+            ],
+            music: None,
+            width: 1280,
+            height: 720,
+            fps: 30,
+            output: "o.mp4".into(),
+        };
+        // 8 s (ralenti) + 6 s + 6 s - 1 s de fondu enchaîné.
+        assert!((plan.duration() - 19.0).abs() < 1e-9);
+        let args = build_export_args(&plan).unwrap();
+        let f = &args[args.iter().position(|a| a == "-filter_complex").unwrap() + 1];
+        assert!(f.contains("setpts=(PTS-STARTPTS)/0.5"));
+        assert!(f.contains("xfade=transition=fade:duration=1:offset=7[vx1]"));
+        assert!(f.contains("acrossfade=d=1[ax1]"));
+        assert!(f.contains("eval=frame,crop=1280:720"));
+        assert!(f.contains("fade=t=out:st=5.5:d=0.5"));
+        assert!(f.contains("[vx1][ax1][v2][a2]concat=n=2:v=1:a=1[vx2][ax2]"));
+    }
+
+    #[test]
     fn decale_le_debut_de_la_chanson() {
-        let seg = ExportSegment { path: "a.mp4".into(), in_point: 0.0, out_point: 10.0, keep_audio: false };
+        let seg = ExportSegment { path: "a.mp4".into(), in_point: 0.0, out_point: 10.0, keep_audio: false, ..seg() };
         let mut plan = ExportPlan {
             segments: vec![seg],
             music: Some(ExportMusic { path: "s.mp3".into(), start: 4.0, volume: 1.0, fade_in: 0.0, fade_out: 2.0 }),
@@ -452,8 +644,9 @@ mod tests {
         run(&["-f", "lavfi", "-i", "sine=f=500:duration=20", &f("song.mp3")]);
         let plan = ExportPlan {
             segments: vec![
-                ExportSegment { path: f("a.mp4"), in_point: 0.5, out_point: 3.0, keep_audio: true },
-                ExportSegment { path: f("b.mp4"), in_point: 0.0, out_point: 3.0, keep_audio: false },
+                ExportSegment { path: f("a.mp4"), in_point: 0.5, out_point: 3.0, keep_audio: true, crossfade_next: 1.0, ..seg() },
+                ExportSegment { path: f("b.mp4"), in_point: 0.0, out_point: 3.0, zoom: "in".into(), fade_out_black: 0.5, ..seg() },
+                ExportSegment { path: f("a.mp4"), in_point: 0.0, out_point: 2.0, keep_audio: true, speed: 0.5, fade_in_black: 0.5, ..seg() },
             ],
             music: Some(ExportMusic { path: f("song.mp3"), start: 1.5, volume: 0.7, fade_in: 1.0, fade_out: 1.0 }),
             width: 1280,
@@ -467,7 +660,9 @@ mod tests {
         let info = probe(Path::new("ffprobe"), &f("out.mp4")).unwrap();
         assert_eq!((info.width, info.height), (Some(1280), Some(720)));
         assert!(info.has_audio);
-        assert!((info.duration - 5.5).abs() < 0.15, "durée {}", info.duration);
+        // 2,5 + 3 + 4 (ralenti) - 1 (fondu enchaîné) = 8,5 s.
+        assert!((plan.duration() - 8.5).abs() < 1e-9);
+        assert!((info.duration - 8.5).abs() < 0.15, "durée {}", info.duration);
     }
 }
 
