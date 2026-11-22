@@ -30,12 +30,10 @@ Prévu plus tard : texte animé, images clés, réglages de couleur.
 
 ## Installer le logiciel sous Windows
 
-1. Ouvre l'onglet **Actions** du dépôt GitHub, puis le dernier passage réussi (coche verte) de « Installateur Windows ».
-   Quand une version officielle existe, elle est aussi dans l'onglet **Releases**.
-2. En bas de la page, dans **Artifacts**, télécharge `installateur-windows` (un fichier ZIP) et décompresse-le.
-3. Lance `Montage Vidéo_x.y.z_x64-setup.exe`.
-   Windows peut afficher « Windows a protégé votre ordinateur », car le logiciel n'est pas signé par un éditeur payant : clique sur **Informations complémentaires**, puis **Exécuter quand même**.
-4. Le logiciel apparaît dans le menu Démarrer sous le nom **Montage Vidéo**.
+1. Ouvre l'onglet **Releases** du dépôt GitHub et télécharge `Montage.Video_x.y.z_x64-setup.exe` (ou un nom proche) dans la dernière version. Cet installateur est signé au nom de Yann TANGUY.
+2. Lance-le.
+   Si Windows affiche « Windows a protégé votre ordinateur », clique sur **Informations complémentaires**, puis **Exécuter quand même**.
+3. Le logiciel apparaît dans le menu Démarrer sous le nom **Montage Vidéo**.
 
 L'installateur contient déjà **FFmpeg**, l'outil qui lit et fabrique les vidéos : il n'y a rien d'autre à installer.
 
