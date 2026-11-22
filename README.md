@@ -6,7 +6,7 @@ Il est conçu d'abord pour réaliser un **clip musical** à partir de courts cli
 
 ## Ce que sait faire la version 1
 
-- **Importer** des vidéos (MP4, MOV, MKV, WEBM…) et une chanson (MP3, WAV, M4A…), avec le bouton « Importer » ou en glissant les fichiers dans la fenêtre. Les vidéos vont dans la bibliothèque ; c'est toi qui les poses sur la timeline, dans l'ordre que tu veux, en les y faisant glisser (ou par double-clic pour les ajouter à la fin).
+- **Importer** des vidéos (MP4, MOV, MKV, WEBM…) et une chanson (MP3, WAV, M4A…), avec le bouton « Importer » ou en glissant les fichiers dans la fenêtre. Les fichiers vont dans la bibliothèque ; c'est toi qui les poses sur la timeline, dans l'ordre que tu veux, en les y faisant glisser (ou par double-clic pour les ajouter à la fin).
 - **Couper le son des clips** : coché par défaut quand on pose un clip sur la timeline, réglable clip par clip ou pour tous les clips d'un coup.
 - **Timeline** avec une piste vidéo et une piste musique :
   - ranger les clips en les faisant glisser ;
@@ -14,7 +14,7 @@ Il est conçu d'abord pour réaliser un **clip musical** à partir de courts cli
   - les couper en deux à la position du curseur (« Couper ici » ou touche <kbd>S</kbd>) ;
   - les dupliquer ou les supprimer.
 - **Aperçu** en direct, avec lecture/pause et déplacement image par image.
-- **Musique** : volume, fondu au début et fondu à la fin.
+- **Musique** : tu poses la chanson sur la piste musique à l'endroit voulu (par exemple après quelques secondes d'intro), puis tu règles le volume, le fondu au début et le fondu à la fin.
 - **Export MP4** en 720p ou 1080p, en paysage, portrait ou carré, à 24, 25, 30 ou 60 images par seconde. Les clips d'un format différent sont centrés avec des bandes noires.
 - **Annuler / Rétablir** (<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>).
 - **Enregistrer le projet** (fichier `.montage`) pour le rouvrir plus tard.

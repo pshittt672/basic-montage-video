@@ -31,7 +31,6 @@ import {
   removeClip,
   serializeProject,
   setClipMuted,
-  setMusic,
   splitAt,
   totalDuration,
   type MediaItem,
@@ -113,7 +112,7 @@ export default function App() {
   /**
    * Importe des fichiers dans la bibliothèque. Les vidéos n'y sont que rangées :
    * c'est l'utilisateur qui les pose sur la timeline, dans l'ordre qu'il veut.
-   * Une chanson importée devient la musique du montage.
+   * Il en va de même pour la chanson, posée sur la piste musique à l'endroit voulu.
    */
   const importPaths = useCallback(
     async (paths: string[]) => {
@@ -131,11 +130,7 @@ export default function App() {
       setBusy(null);
       // Rangement par nom dans la bibliothèque, pour retrouver facilement clip_001, clip_002...
       items.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-      const song = items.find((m) => m.kind === "audio");
-      apply((p) => {
-        const next = addMedia(p, items);
-        return song ? setMusic(next, song.id) : next;
-      });
+      apply((p) => addMedia(p, items));
       if (errors.length) flash(`Certains fichiers n'ont pas pu être importés :\n${errors.join("\n")}`);
     },
     [apply, flash],

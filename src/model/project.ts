@@ -35,6 +35,8 @@ export interface Clip {
 /** La chanson posée sous tout le montage. */
 export interface Music {
   mediaId: string;
+  /** Instant de la timeline (en secondes) où la chanson commence. */
+  start: number;
   /** 1 = volume normal, 0 = muet. */
   volume: number;
   /** Durée des fondus en secondes (0 = pas de fondu). */
@@ -226,9 +228,10 @@ export function removeMedia(p: Project, mediaId: string): Project {
   };
 }
 
-export function setMusic(p: Project, mediaId: string): Project {
+/** Pose une chanson sur la piste musique, à l'instant `start` de la timeline. */
+export function setMusic(p: Project, mediaId: string, start = 0): Project {
   const keep = p.music ?? { volume: 1, fadeIn: 0, fadeOut: 2 };
-  return { ...p, music: { ...keep, mediaId } };
+  return { ...p, music: { ...keep, mediaId, start: Math.max(0, start) } };
 }
 
 export function updateMusic(p: Project, change: Partial<Omit<Music, "mediaId">>): Project {
@@ -256,7 +259,7 @@ export function exportSize(s: ExportSettings): { width: number; height: number }
 /** Plan d'export envoyé à la partie Rust (voir `src-tauri/src/ffmpeg.rs`). */
 export interface ExportPlan {
   segments: { path: string; inPoint: number; outPoint: number; keepAudio: boolean }[];
-  music: { path: string; volume: number; fadeIn: number; fadeOut: number } | null;
+  music: { path: string; start: number; volume: number; fadeIn: number; fadeOut: number } | null;
   width: number;
   height: number;
   fps: number;
@@ -275,10 +278,12 @@ export function buildExportPlan(p: Project, output: string): ExportPlan {
     };
   });
   const musicMedia = p.music ? getMedia(p, p.music.mediaId) : undefined;
+  // Une chanson qui commence après la fin de la vidéo ne s'entendrait pas.
   const music =
-    p.music && musicMedia
+    p.music && musicMedia && p.music.start < totalDuration(p)
       ? {
           path: musicMedia.path,
+          start: p.music.start,
           volume: p.music.volume,
           fadeIn: p.music.fadeIn,
           fadeOut: p.music.fadeOut,
@@ -339,7 +344,7 @@ export function parseProject(text: string): Project {
   return {
     ...base,
     ...p,
-    music: p.music ?? null,
+    music: p.music ? { ...p.music, start: p.music.start ?? 0 } : null,
     exportSettings: { ...base.exportSettings, ...p.exportSettings },
   } as Project;
 }

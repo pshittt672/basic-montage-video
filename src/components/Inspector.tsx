@@ -12,6 +12,7 @@ import {
   removeClip,
   removeMusic,
   setClipMuted,
+  totalDuration,
   trimClip,
   updateMusic,
 } from "../model/project";
@@ -122,6 +123,18 @@ export function Inspector({ editor, onSplit }: Props) {
         <h2>Musique</h2>
         <p className="name" title={media?.path}>{media?.name}</p>
         <Slider
+          label="Commence à"
+          value={music.start}
+          min={0}
+          max={Math.max(totalDuration(project), music.start, 1)}
+          step={0.04}
+          unit=""
+          format={formatTime}
+          onChange={(start) => set({ start })}
+          gesture={gesture}
+        />
+        <p className="hint">Tu peux aussi faire glisser la chanson sur la timeline : elle s'aimante au début des clips.</p>
+        <Slider
           label="Volume"
           value={music.volume}
           min={0}
@@ -167,7 +180,7 @@ export function Inspector({ editor, onSplit }: Props) {
         <li><strong>Importe</strong> tes clips vidéo et ta chanson.</li>
         <li><strong>Pose</strong> les clips sur la timeline en les faisant glisser depuis la bibliothèque, dans l'ordre que tu veux. Tu peux ensuite les déplacer.</li>
         <li><strong>Raccourcis</strong> un clip en tirant sur ses bords, ou coupe-le en deux avec « Couper ici ».</li>
-        <li>Clique sur la piste musique pour régler le <strong>volume</strong> et les <strong>fondus</strong>.</li>
+        <li><strong>Pose la chanson</strong> sur la piste musique, à l'endroit où elle doit commencer, puis clique dessus pour régler le <strong>volume</strong> et les <strong>fondus</strong>.</li>
         <li><strong>Exporte</strong> ta vidéo en MP4.</li>
       </ol>
       <h3>Raccourcis clavier</h3>

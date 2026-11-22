@@ -16,6 +16,8 @@ import {
   insertClip,
   moveClip,
   removeClip,
+  setMusic,
+  updateMusic,
   setAllMuted,
   setClipMuted,
   totalDuration,
@@ -51,13 +53,15 @@ export function Timeline({ editor, onSplit }: Props) {
   const [pps, setPps] = useState(40); // pixels par seconde (zoom)
   const [drag, setDrag] = useState<{ id: string; x: number; target: number } | null>(null);
   const [libraryDrop, setLibraryDrop] = useState<number | null>(null); // position d'insertion
+  const [musicDrop, setMusicDrop] = useState<number | null>(null); // début de la chanson déposée
   const videoTrack = useRef<HTMLDivElement>(null);
+  const musicTrack = useRef<HTMLDivElement>(null);
   const fitted = useRef(false);
 
   const total = totalDuration(project);
   const starts = clipStarts(project);
   const musicMedia = project.music ? getMedia(project, project.music.mediaId) : undefined;
-  const length = Math.max(total, musicMedia?.duration ?? 0, 10);
+  const length = Math.max(total, (project.music?.start ?? 0) + (musicMedia?.duration ?? 0), 10);
   const width = PAD * 2 + length * pps + 200;
   const selectedClip =
     selection?.kind === "clip" ? project.clips.find((c) => c.id === selection.id) : undefined;
@@ -170,25 +174,71 @@ export function Timeline({ editor, onSplit }: Props) {
     return index;
   };
 
-  // Clip glissé depuis la bibliothèque : marqueur d'insertion, puis ajout au lâcher.
-  const dragRef = useRef({ project, indexAt, timeAt, apply });
-  dragRef.current = { project, indexAt, timeAt, apply };
+  /**
+   * Aimantation de la chanson : près du début ou d'une limite entre deux
+   * clips (à moins de 10 pixels), elle s'y cale exactement.
+   */
+  const snapMusic = (t: number) => {
+    const points = [0, ...clipStarts(project), total];
+    const near = points.find((pt) => Math.abs(pt - t) * pps < 10);
+    return Math.max(0, near ?? t);
+  };
+
+  // Fichier glissé depuis la bibliothèque : marqueur, puis pose au lâcher.
+  // Une vidéo va sur la piste vidéo, une chanson sur la piste musique.
+  const dragRef = useRef({ project, indexAt, timeAt, apply, snapMusic });
+  dragRef.current = { project, indexAt, timeAt, apply, snapMusic };
   useEffect(
     () =>
       onLibraryDrag((d) => {
-        const r = videoTrack.current?.getBoundingClientRect();
-        const over = !!r && d.clientX >= r.left && d.clientX <= r.right && d.clientY >= r.top - 20 && d.clientY <= r.bottom + 20;
-        const { project, indexAt, timeAt, apply } = dragRef.current;
-        const index = over ? indexAt(timeAt(d.clientX)) : null;
-        if (d.phase === "move") setLibraryDrop(index);
-        else {
-          setLibraryDrop(null);
-          const media = getMedia(project, d.mediaId);
-          if (d.phase === "drop" && index !== null && media) apply((p) => insertClip(p, media, index));
+        const { project, indexAt, timeAt, apply, snapMusic } = dragRef.current;
+        const media = getMedia(project, d.mediaId);
+        if (!media) return;
+        const track = media.kind === "video" ? videoTrack.current : musicTrack.current;
+        const r = track?.getBoundingClientRect();
+        const over =
+          !!r && d.clientX >= r.left && d.clientX <= r.right && d.clientY >= r.top - 20 && d.clientY <= r.bottom + 20;
+        if (media.kind === "video") {
+          const index = over ? indexAt(timeAt(d.clientX)) : null;
+          setLibraryDrop(d.phase === "move" ? index : null);
+          if (d.phase === "drop" && index !== null) apply((p) => insertClip(p, media, index));
+        } else {
+          const start = over ? snapMusic(timeAt(d.clientX)) : null;
+          setMusicDrop(d.phase === "move" ? start : null);
+          if (d.phase === "drop" && start !== null) {
+            apply((p) => setMusic(p, media.id, start));
+            select({ kind: "music" });
+          }
         }
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+
+  /** Faire glisser la chanson pour changer le moment où elle commence. */
+  const startMusicMove = (e: ReactPointerEvent) => {
+    if (e.button !== 0 || !project.music) return;
+    e.stopPropagation();
+    select({ kind: "music" });
+    const x0 = e.clientX;
+    const start0 = project.music.start;
+    let moving = false;
+    const move = (ev: PointerEvent) => {
+      if (!moving && Math.abs(ev.clientX - x0) < 5) return;
+      if (!moving) gesture.start();
+      moving = true;
+      const start = snapMusic(start0 + (ev.clientX - x0) / pps);
+      gesture.update((p) => updateMusic(p, { start }));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (moving) gesture.end();
+      else seek(timeAt(x0));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   // Graduations de la règle.
   const step = tickStep(pps);
@@ -278,29 +328,33 @@ export function Timeline({ editor, onSplit }: Props) {
               {dropX !== null && <div className="drop-marker" style={{ left: dropX - 2 }} />}
             </div>
 
-            <div className="track music-track" onPointerDown={scrub}>
-              {musicMedia ? (
+            <div
+              className={`track music-track ${musicDrop !== null ? "drop-over" : ""}`}
+              ref={musicTrack}
+              onPointerDown={scrub}
+            >
+              {musicMedia && project.music ? (
                 <div
                   className={`music-block ${selection?.kind === "music" ? "selected" : ""}`}
-                  style={{ left: PAD, width: musicMedia.duration * pps }}
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    select({ kind: "music" });
-                    scrub(e);
-                  }}
+                  style={{ left: PAD + project.music.start * pps, width: musicMedia.duration * pps }}
+                  onPointerDown={startMusicMove}
+                  title="Glisser pour choisir le moment où la chanson commence"
                 >
                   <span className="clip-name">♪ {musicMedia.name}</span>
-                  {musicMedia.duration > total && total > 0 && (
+                  {project.music.start + musicMedia.duration > total && total > 0 && (
                     <div
                       className="unused"
-                      style={{ left: total * pps }}
+                      style={{ left: Math.max(0, total - project.music.start) * pps }}
                       title="Cette partie de la chanson dépasse la fin de la vidéo : elle ne sera pas exportée."
                     />
                   )}
                 </div>
               ) : (
-                <div className="track-empty">Importe une chanson (MP3, WAV…) pour la poser sous le montage.</div>
+                musicDrop === null && (
+                  <div className="track-empty">Glisse ici une chanson de la bibliothèque, à l'endroit où elle doit commencer.</div>
+                )
               )}
+              {musicDrop !== null && <div className="drop-marker" style={{ left: PAD + musicDrop * pps - 2 }} />}
             </div>
 
             <div className="playhead" style={{ left: PAD + time * pps }} />

@@ -191,6 +191,9 @@ pub struct ExportSegment {
 #[serde(rename_all = "camelCase")]
 pub struct ExportMusic {
     pub path: String,
+    /// Instant du film (en secondes) où la chanson commence.
+    #[serde(default)]
+    pub start: f64,
     /// Volume de 0 (muet) à 1 (normal) ; au-delà, le son est amplifié.
     pub volume: f64,
     pub fade_in: f64,
@@ -277,25 +280,34 @@ pub fn build_export_args(plan: &ExportPlan) -> Result<Vec<String>, String> {
     let n = plan.segments.len();
     filters.push(format!("{concat_inputs}concat=n={n}:v=1:a=1[vout][clips]"));
 
-    if let Some(m) = &plan.music {
+    // La chanson n'est gardée que si elle commence avant la fin du film.
+    let music = plan.music.as_ref().filter(|m| m.start.max(0.0) < total);
+    if let Some(m) = music {
         let idx = n;
+        let start = m.start.max(0.0);
+        // Durée pendant laquelle la chanson s'entend.
+        let heard = total - start;
         args.extend(["-i".into(), m.path.clone()]);
         let mut chain = format!(
             "[{idx}:a]aresample=48000,aformat=channel_layouts=stereo,\
              atrim=duration={t},asetpts=PTS-STARTPTS,volume={v}",
-            t = num(total),
+            t = num(heard),
             v = num(m.volume.max(0.0))
         );
         if m.fade_in > 0.0 {
             chain.push_str(&format!(",afade=t=in:st=0:d={}", num(m.fade_in)));
         }
         if m.fade_out > 0.0 {
-            let start = (total - m.fade_out).max(0.0);
+            let fade_start = (heard - m.fade_out).max(0.0);
             chain.push_str(&format!(
                 ",afade=t=out:st={}:d={}",
-                num(start),
+                num(fade_start),
                 num(m.fade_out)
             ));
+        }
+        if start > 0.0 {
+            // Silence avant le début de la chanson (en millisecondes).
+            chain.push_str(&format!(",adelay=delays={}:all=1", (start * 1000.0).round() as u64));
         }
         chain.push_str("[music]");
         filters.push(chain);
@@ -377,7 +389,7 @@ mod tests {
                 ExportSegment { path: "a.mp4".into(), in_point: 1.0, out_point: 4.0, keep_audio: false },
                 ExportSegment { path: "b.mp4".into(), in_point: 0.0, out_point: 2.5, keep_audio: true },
             ],
-            music: Some(ExportMusic { path: "song.mp3".into(), volume: 0.8, fade_in: 1.0, fade_out: 2.0 }),
+            music: Some(ExportMusic { path: "song.mp3".into(), start: 0.0, volume: 0.8, fade_in: 1.0, fade_out: 2.0 }),
             width: 1920,
             height: 1080,
             fps: 30,
@@ -391,6 +403,30 @@ mod tests {
         assert!(filter.contains("concat=n=2:v=1:a=1"));
         assert!(filter.contains("afade=t=out:st=3.5:d=2"));
         assert_eq!(args.last().unwrap(), "out.mp4");
+    }
+
+    #[test]
+    fn decale_le_debut_de_la_chanson() {
+        let seg = ExportSegment { path: "a.mp4".into(), in_point: 0.0, out_point: 10.0, keep_audio: false };
+        let mut plan = ExportPlan {
+            segments: vec![seg],
+            music: Some(ExportMusic { path: "s.mp3".into(), start: 4.0, volume: 1.0, fade_in: 0.0, fade_out: 2.0 }),
+            width: 1280,
+            height: 720,
+            fps: 30,
+            output: "o.mp4".into(),
+        };
+        let filter_of = |plan: &ExportPlan| {
+            let args = build_export_args(plan).unwrap();
+            args[args.iter().position(|a| a == "-filter_complex").unwrap() + 1].clone()
+        };
+        let f = filter_of(&plan);
+        assert!(f.contains("atrim=duration=6,"));
+        assert!(f.contains("afade=t=out:st=4:d=2"));
+        assert!(f.contains("adelay=delays=4000:all=1"));
+        // Chanson posée après la fin du film : elle est ignorée.
+        plan.music.as_mut().unwrap().start = 12.0;
+        assert!(!filter_of(&plan).contains("amix"));
     }
 
     #[test]
@@ -419,7 +455,7 @@ mod tests {
                 ExportSegment { path: f("a.mp4"), in_point: 0.5, out_point: 3.0, keep_audio: true },
                 ExportSegment { path: f("b.mp4"), in_point: 0.0, out_point: 3.0, keep_audio: false },
             ],
-            music: Some(ExportMusic { path: f("song.mp3"), volume: 0.7, fade_in: 1.0, fade_out: 1.0 }),
+            music: Some(ExportMusic { path: f("song.mp3"), start: 1.5, volume: 0.7, fade_in: 1.0, fade_out: 1.0 }),
             width: 1280,
             height: 720,
             fps: 30,

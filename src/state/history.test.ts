@@ -15,7 +15,7 @@ it("annule et rétablit", () => {
 });
 
 it("compte un geste continu comme une seule étape", () => {
-  const start: Project = { ...emptyProject(), music: { mediaId: "m", volume: 1, fadeIn: 0, fadeOut: 0 } };
+  const start: Project = { ...emptyProject(), music: { mediaId: "m", start: 0, volume: 1, fadeIn: 0, fadeOut: 0 } };
   let h = initHistory(start);
   h = historyReducer(h, { type: "gestureStart" });
   for (const v of [0.9, 0.8, 0.7]) {

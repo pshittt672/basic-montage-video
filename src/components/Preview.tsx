@@ -20,12 +20,14 @@ import {
   type Project,
 } from "../model/project";
 
-/** Volume de la musique à l'instant t, fondus compris (de 0 à 1). */
+/** Volume de la musique à l'instant t de la timeline, fondus compris (de 0 à 1). */
 export function musicGain(p: Project, t: number): number {
   if (!p.music) return 0;
   const total = totalDuration(p);
+  const local = t - p.music.start; // position dans la chanson
+  if (local < 0) return 0;
   let g = Math.min(1, Math.max(0, p.music.volume));
-  if (p.music.fadeIn > 0) g *= Math.min(1, t / p.music.fadeIn);
+  if (p.music.fadeIn > 0) g *= Math.min(1, local / p.music.fadeIn);
   if (p.music.fadeOut > 0) g *= Math.min(1, Math.max(0, (total - t) / p.music.fadeOut));
   return Math.max(0, Math.min(1, g));
 }
@@ -42,6 +44,21 @@ export function Preview({ editor }: { editor: Editor }) {
   const duration = totalDuration(project);
   const musicMedia = project.music ? getMedia(project, project.music.mediaId) : undefined;
   const { width, height } = exportSize(project.exportSettings);
+
+  /** Fait jouer la chanson au bon endroit (elle peut commencer après le début). */
+  const syncMusic = (t: number, isPlaying: boolean) => {
+    const a = audio.current;
+    const p = projectRef.current;
+    if (!a || !a.src || !p.music) return;
+    const local = t - p.music.start;
+    a.volume = musicGain(p, t);
+    if (!isPlaying || local < 0 || (a.duration && local >= a.duration)) {
+      a.pause();
+      return;
+    }
+    if (a.paused || Math.abs(a.currentTime - local) > 0.25) a.currentTime = local;
+    if (a.paused) void a.play().catch(() => {});
+  };
 
   /** Affiche la bonne image de la timeline à l'instant t. */
   const render = (t: number, isPlaying: boolean) => {
@@ -103,11 +120,9 @@ export function Preview({ editor }: { editor: Editor }) {
 
   // Hors lecture : on affiche l'image correspondant au curseur.
   useEffect(() => {
-    if (!playing) render(time, false);
-    const a = audio.current;
-    if (a && !playing) {
-      a.pause();
-      a.volume = musicGain(project, time);
+    if (!playing) {
+      render(time, false);
+      syncMusic(time, false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [time, playing, project]);
@@ -122,10 +137,6 @@ export function Preview({ editor }: { editor: Editor }) {
       return;
     }
     const a = audio.current;
-    if (a && a.src) {
-      a.currentTime = t0;
-      void a.play().catch(() => {});
-    }
     const wallStart = performance.now();
     let frame = 0;
     const tick = () => {
@@ -137,10 +148,7 @@ export function Preview({ editor }: { editor: Editor }) {
         return;
       }
       render(t, true);
-      if (a && a.src) {
-        if (t < a.duration && Math.abs(a.currentTime - t) > 0.25) a.currentTime = t;
-        a.volume = musicGain(p, t);
-      }
+      syncMusic(t, true);
       seek(t);
       frame = requestAnimationFrame(tick);
     };

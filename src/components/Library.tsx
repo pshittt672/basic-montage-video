@@ -21,7 +21,7 @@ export function Library({ editor, onImport }: Props) {
 
   /** Glisser une vidéo de la bibliothèque jusqu'à la timeline. */
   const startDrag = (e: ReactPointerEvent, m: MediaItem) => {
-    if (e.button !== 0 || m.kind !== "video" || (e.target as HTMLElement).closest("button")) return;
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
     const x0 = e.clientX;
     const y0 = e.clientY;
     let dragging = false;
@@ -45,7 +45,7 @@ export function Library({ editor, onImport }: Props) {
   const use = (m: MediaItem) => {
     if (m.kind === "video") apply((p) => insertClip(p, m));
     else {
-      apply((p) => setMusic(p, m.id));
+      apply((p) => setMusic(p, m.id, 0));
       editor.select({ kind: "music" });
     }
   };
@@ -91,7 +91,7 @@ export function Library({ editor, onImport }: Props) {
                 <div className="media-actions">
                   <button
                     onClick={() => use(m)}
-                    title={m.kind === "video" ? "Ajouter à la fin de la timeline" : "Utiliser comme musique"}
+                    title={m.kind === "video" ? "Ajouter à la fin de la timeline" : "Poser comme musique, au début du montage"}
                   >
                     ＋
                   </button>
@@ -108,8 +108,11 @@ export function Library({ editor, onImport }: Props) {
           })}
         </ul>
       )}
-      {project.media.some((m) => m.kind === "video") && (
-        <p className="hint">Glisse un clip sur la timeline, à l'endroit voulu. Double-clic ou « ＋ » : ajout à la fin.</p>
+      {project.media.length > 0 && (
+        <p className="hint">
+          Glisse un clip ou une chanson sur la timeline, à l'endroit voulu. Double-clic ou « ＋ » : clip ajouté à la
+          fin, chanson posée au début.
+        </p>
       )}
       {ghost && (
         <div className="drag-ghost" style={{ left: ghost.x + 12, top: ghost.y + 8 }}>

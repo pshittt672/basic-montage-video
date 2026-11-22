@@ -77,7 +77,9 @@ describe("export", () => {
     p = setMusic({ ...p, media: [...p.media, song] }, "song");
     const plan = buildExportPlan(p, "C:/out.mp4");
     expect(plan.segments.map((s) => s.keepAudio)).toEqual([true, false]);
-    expect(plan.music?.path).toBe("C:/song.mp3");
+    expect(plan.music).toMatchObject({ path: "C:/song.mp3", start: 0 });
+    // Une chanson posée après la fin de la vidéo n'est pas exportée.
+    expect(buildExportPlan(setMusic(p, "song", 25), "C:/out.mp4").music).toBeNull();
     expect([plan.width, plan.height]).toEqual([1920, 1080]);
   });
 
