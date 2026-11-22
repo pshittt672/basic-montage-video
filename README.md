@@ -1,11 +1,70 @@
-# Montage vidéo simple
+# Montage Vidéo
 
 Un logiciel de montage vidéo **simple et gratuit pour Windows**, pensé pour les débutants.
 
-Objectif principal : réaliser un clip musical à partir de courts clips vidéo (par exemple générés par une IA), en les coupant, en les enchaînant et en posant une chanson sur l'ensemble.
+Il est conçu d'abord pour réaliser un **clip musical** à partir de courts clips vidéo (par exemple générés par une IA comme LTX-2) : on importe les clips et la chanson, on range et raccourcit les clips, on coupe leur son d'origine, puis on exporte un MP4.
 
-Le développement est en cours. Les instructions d'installation arriveront avec la première version.
+## Ce que sait faire la version 1
 
-## Licence
+- **Importer** des vidéos (MP4, MOV, MKV, WEBM…) et une chanson (MP3, WAV, M4A…), avec le bouton « Importer » ou en glissant les fichiers dans la fenêtre. Les fichiers vont dans la bibliothèque ; c'est toi qui les poses sur la timeline, dans l'ordre que tu veux, en les y faisant glisser (ou par double-clic pour les ajouter à la fin).
+- **Couper le son des clips** : coché par défaut quand on pose un clip sur la timeline, réglable clip par clip ou pour tous les clips d'un coup.
+- **Timeline** avec une piste vidéo et une piste musique :
+  - ranger les clips en les faisant glisser ;
+  - les raccourcir en tirant sur leurs bords ;
+  - les couper en deux à la position du curseur (« Couper ici » ou touche <kbd>S</kbd>) ;
+  - les dupliquer ou les supprimer.
+- **Aperçu** en direct, avec lecture/pause et déplacement image par image.
+- **Musique** : tu poses la chanson sur la piste musique à l'endroit voulu (par exemple après quelques secondes d'intro), puis tu règles le volume, le fondu au début et le fondu à la fin.
+- **Export MP4** en 720p ou 1080p, en paysage, portrait ou carré, à 24, 25, 30 ou 60 images par seconde. Les clips d'un format différent sont centrés avec des bandes noires.
+- **Annuler / Rétablir** (<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>).
+- **Enregistrer le projet** (fichier `.montage`) pour le rouvrir plus tard.
 
-Code publié sous licence MIT (voir [LICENSE](LICENSE)).
+### Fonctions avancées (discrètes, pour aller plus loin)
+
+- **Forme d'onde** de la chanson sur la piste musique, pour repérer les temps forts.
+- **Marqueurs de rythme** : pendant la lecture, tape <kbd>B</kbd> sur chaque temps fort. Avec l'**aimantation**, le curseur et les bords des clips viennent se caler dessus : les coupes tombent en rythme. Les marqueurs suivent la chanson si on la déplace ; clic droit sur la règle pour en effacer un.
+- **Effets d'un clip** (panneau de droite, rubrique « Effets ») : vitesse (ralenti ou accéléré), zoom lent avant ou arrière, transition vers le clip suivant (fondu enchaîné ou fondu au noir).
+- **Harmonisation automatique** : à l'export, tous les clips sont mis à la même taille et à la même cadence.
+
+Prévu plus tard : texte animé, images clés, réglages de couleur.
+
+## Installer le logiciel sous Windows
+
+1. Ouvre l'onglet **Releases** du dépôt GitHub et télécharge `Montage.Video_x.y.z_x64-setup.exe` (ou un nom proche) dans la dernière version. Cet installateur est signé au nom de Yann TANGUY.
+2. Lance-le.
+   Si Windows affiche « Windows a protégé votre ordinateur », clique sur **Informations complémentaires**, puis **Exécuter quand même**.
+3. Le logiciel apparaît dans le menu Démarrer sous le nom **Montage Vidéo**.
+
+L'installateur contient déjà **FFmpeg**, l'outil qui lit et fabrique les vidéos : il n'y a rien d'autre à installer.
+
+## Pour les développeurs
+
+Le logiciel utilise [Tauri 2](https://tauri.app) : l'interface est une page web (React + TypeScript, dossier `src/`) et la partie système est écrite en Rust (dossier `src-tauri/`). Le traitement vidéo est confié à [FFmpeg](https://ffmpeg.org).
+
+### Organisation du code
+
+| Fichier | Rôle |
+| --- | --- |
+| `src/model/project.ts` | Les données du montage et toutes les opérations (rogner, couper, déplacer…) |
+| `src/state/history.ts` | Annuler / Rétablir |
+| `src/components/` | Les zones de l'écran : bibliothèque, aperçu, timeline, réglages, export |
+| `src/lib/backend.ts` | Les appels vers la partie Rust |
+| `src-tauri/src/ffmpeg.rs` | Lecture des fichiers, forme d'onde et construction de la commande d'export FFmpeg |
+| `src-tauri/src/lib.rs` | Les commandes appelées par l'interface |
+
+### Lancer en mode développement
+
+Prérequis : [Node.js](https://nodejs.org) 22, [Rust](https://rustup.rs), les [prérequis Tauri](https://tauri.app/start/prerequisites/) et FFmpeg dans le PATH (`winget install Gyan.FFmpeg`).
+
+```bash
+npm install
+npm run tauri dev     # lance le logiciel
+npm test              # tests de l'interface
+cd src-tauri && cargo test -- --include-ignored   # tests Rust, dont un vrai export
+```
+
+## Licences
+
+Le code de ce logiciel est publié sous licence MIT (voir [LICENSE](LICENSE)).
+
+L'installateur Windows inclut FFmpeg (build de [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)), distribué sous licence GPL ; son texte de licence est installé à côté de `ffmpeg.exe`. Le code source de FFmpeg est disponible sur [ffmpeg.org](https://ffmpeg.org/download.html).
