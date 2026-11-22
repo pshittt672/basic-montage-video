@@ -5,7 +5,12 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
-  server: { port: 1420, strictPort: true },
+  server: {
+    port: 1420,
+    strictPort: true,
+    // Ne pas surveiller la partie Rust : sa compilation (dossier target) gêne Vite sous Windows.
+    watch: { ignored: ["**/src-tauri/**"] },
+  },
   envPrefix: ["VITE_", "TAURI_ENV_"],
   build: { target: "es2022" },
 });
